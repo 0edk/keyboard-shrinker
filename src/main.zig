@@ -1,7 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-fn Trie(comptime K: type, comptime V: type) type {
+pub fn Trie(comptime K: type, comptime V: type) type {
     return struct {
         const Self = @This();
         leaf: V = 0,
@@ -41,6 +41,15 @@ fn Trie(comptime K: type, comptime V: type) type {
                 }
             }
         }
+
+        pub fn show(self: *const Self, writer: anytype, depth: usize) !void {
+            var it = self.children.iterator();
+            while (it.next()) |child| {
+                try writer.writeByteNTimes(' ', 2 * depth);
+                try writer.print("{c}{s}\n", .{ child.key_ptr.*, if (child.value_ptr.leaf != 0) "$" else "" });
+                try child.value_ptr.show(writer, depth + 1);
+            }
+        }
     };
 }
 
@@ -51,20 +60,31 @@ pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(debug_alloc.allocator());
     defer arena.deinit();
     const main_alloc = arena.allocator();
-    //const word_list = "dicts/google_100";
-    const dict_trie = Trie(u8, u32).init(main_alloc);
+    const word_list_filename = "dicts/google_100";
+    const word_list_file = try std.fs.cwd().openFile(word_list_filename, .{});
+    const wlr = word_list_file.reader();
+    var dict_trie = Trie(u8, u32).init(main_alloc);
     defer dict_trie.deinit();
+    var i: u32 = 0;
+    while (wlr.readUntilDelimiterAlloc(main_alloc, '\n', 128)) |line| {
+        i += 1;
+        (try dict_trie.get(line)).leaf = 1000 / i;
+    } else |err| {
+        if (err != error.EndOfStream) {
+            std.debug.print("error: {!}\n", .{err});
+        }
+    }
     const stdout_file = std.io.getStdOut().writer();
     var bw = std.io.bufferedWriter(stdout_file);
     const stdout = bw.writer();
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
+    try dict_trie.show(stdout, 0);
     try bw.flush();
 }
 
 test "trie on string" {
     var trie = Trie(u8, u32).init(std.testing.allocator);
     defer trie.deinit();
-    const words = [_][]const u8{"a", "to", "tea", "ted", "ten", "i", "in", "inn"};
+    const words = [_][]const u8{ "a", "to", "tea", "ted", "ten", "i", "in", "inn" };
     for (words) |word| {
         const branch = try trie.get(word);
         branch.leaf += 1;
