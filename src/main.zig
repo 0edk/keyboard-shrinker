@@ -11,7 +11,9 @@ pub fn Trie(comptime K: type, comptime V: type) type {
         allocator: Allocator,
 
         pub fn init(allocator: Allocator) Self {
-            return Self{ .allocator = allocator, };
+            return Self{
+                .allocator = allocator,
+            };
         }
 
         pub fn deinit(self: *Self) void {
@@ -53,32 +55,103 @@ pub fn Trie(comptime K: type, comptime V: type) type {
 }
 
 const Letter = u5;
+const AvailableLetters = 1 << @typeInfo(Letter).int.bits;
+const LettersSubset = [AvailableLetters]bool;
+
+fn charToLetter(char: u8) ?Letter {
+    if (std.ascii.isAlphabetic(char)) {
+        return @intCast(std.ascii.toLower(char) - 'a');
+    }
+    return null;
+}
 
 fn charsToLetters(allocator: Allocator, str: []const u8) Allocator.Error!std.ArrayList(Letter) {
     var projected = std.ArrayList(Letter).init(allocator);
     for (str) |c| {
-        if (std.ascii.isAlphabetic(c)) {
-            try projected.append(@intCast(std.ascii.toLower(c) - 'a'));
+        if (charToLetter(c)) |l| {
+            try projected.append(l);
         }
     }
     return projected;
 }
 
-fn lettersToChars(allocator: Allocator, letters: []const Letter) Allocator.Error!std.ArrayList(Letter) {
-    var s = String.initCapacity(allocator, letters.len);
+fn lettersToChars(allocator: Allocator, letters: []const Letter) Allocator.Error!std.ArrayList(u8) {
+    var s = try String.initCapacity(allocator, letters.len);
     for (letters) |l| {
-        s.append(l + 'a');
+        const c: u8 = l;
+        try s.append(c + 'a');
     }
     return s;
 }
 
-const WordTrie = Trie(Letter, u32);
+fn charsToSubset(str: []const u8) LettersSubset {
+    var set: LettersSubset = [_]bool{false} ** AvailableLetters;
+    for (str) |c| {
+        if (charToLetter(c)) |l| {
+            set[l] = true;
+        }
+    }
+    return set;
+}
 
-// TODO
-pub fn expandInput(subset: []const Letter, trie: WordTrie, query: []Letter) Allocator.Error!void {
-    _ = subset;
-    _ = trie;
-    _ = query;
+const WordTrie = Trie(Letter, u32);
+const MatchIteratorLayer = struct {
+    node: *const WordTrie,
+    start: Letter = 0,
+};
+
+const MatchIterator = struct {
+    const Self = @This();
+    subset: LettersSubset,
+    nodes: std.ArrayList(MatchIteratorLayer),
+    query: []Letter,
+    prefix: std.ArrayList(Letter),
+    index: usize = 0,
+
+    fn next(self: *Self) Allocator.Error!?[]Letter {
+        while (self.nodes.pop()) |layer| {
+            for (layer.start..AvailableLetters) |i| {
+                if (layer.node.children[i]) |child| {
+                    const at_query = self.index < self.query.len and i == self.query[self.index];
+                    const outside_subset = !self.subset[i];
+                    if (at_query or outside_subset) {
+                        try self.nodes.append(.{ .node = layer.node, .start = @intCast(i + 1) });
+                        try self.nodes.append(.{ .node = child });
+                        try self.prefix.append(@intCast(i));
+                        if (at_query) {
+                            self.index += 1;
+                        }
+                        if (child.leaf > 0 and self.index == self.query.len) {
+                            return self.prefix.items;
+                        }
+                        break;
+                    }
+                }
+            } else {
+                if (self.prefix.pop()) |last| {
+                    if (self.index > 0 and last == self.query[self.index - 1]) {
+                        self.index -= 1;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+};
+
+pub fn expandInput(subset: LettersSubset, trie: *const WordTrie, query: []Letter) Allocator.Error!MatchIterator {
+    const alloc = trie.allocator;
+    var nodes = std.ArrayList(MatchIteratorLayer).init(alloc);
+    try nodes.append(.{
+        .node = trie,
+    });
+    const prefix = std.ArrayList(Letter).init(alloc);
+    return MatchIterator{
+        .subset = subset,
+        .nodes = nodes,
+        .query = query,
+        .prefix = prefix,
+    };
 }
 
 const alphabet = "abcdefghijklmnopqrstuvwxyz";
@@ -105,10 +178,15 @@ pub fn main() !void {
     const stdin_file = std.io.getStdIn().reader();
     var br = std.io.bufferedReader(stdin_file);
     const stdin = br.reader();
+    const subset = charsToSubset("etao");
     while (try stdin.readUntilDelimiterOrEof(&buf, '\n')) |line| {
-        var it = try expandInput("etao", dict_trie, line);
+        const letters = try charsToLetters(main_alloc, line);
+        defer letters.deinit();
+        var it = try expandInput(subset, &dict_trie, letters.items);
         while (try it.next()) |match| {
-            try stdout.print("{s}\n", .{match});
+            const display = try lettersToChars(main_alloc, match);
+            defer display.deinit();
+            try stdout.print("{s}\n", .{display.items});
             try bw.flush();
         }
     }
