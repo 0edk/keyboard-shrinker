@@ -4,7 +4,8 @@ const Allocator = std.mem.Allocator;
 
 const available_letters = 1 << @typeInfo(trie.Letter).int.bits;
 const LettersSubset = [available_letters]bool;
-const WeightedWord = struct { word: []const u8, weight: u32 };
+pub const Weight = f64;
+const WeightedWord = struct { word: []const u8, weight: Weight };
 pub const CompiledTrie = trie.Trie(trie.Letter, std.ArrayList(WeightedWord));
 
 fn contractOutput(subset: LettersSubset, alloc: Allocator, word: []const u8) Allocator.Error!std.ArrayList(trie.Letter) {
@@ -51,7 +52,7 @@ test "compile google100" {
     const wlr = word_list_file.reader();
     var dict_trie = CompiledTrie.init(std.testing.allocator);
     defer dict_trie.deinit();
-    var i: u32 = 0;
+    var i: Weight = 0;
     const subset = charsToSubset("etao");
     while (try wlr.readUntilDelimiterOrEofAlloc(std.testing.allocator, '\n', 128)) |line| {
         i += 1;
@@ -72,4 +73,44 @@ test "compile google100" {
         std.debug.print("}}\n", .{});
     }
     try std.testing.expectEqual(i, found);
+}
+
+fn sumLeaf(leaf: []const WeightedWord) Weight {
+    var total: Weight = 0;
+    for (leaf) |ww| {
+        total += ww.weight;
+    }
+    return total;
+}
+
+fn sumLeaves(node: *const CompiledTrie) Weight {
+    var total = if (node.leaf.items.len > 0) sumLeaf(node.leaf.items) else 0;
+    for (node.children) |maybe_child| {
+        if (maybe_child) |child| {
+            total += sumLeaves(child);
+        }
+    }
+    return total;
+}
+
+fn unscaleLeaf(leaf: []WeightedWord, divisor: Weight) void {
+    for (0..leaf.len) |i| {
+        leaf[i].weight /= divisor;
+    }
+}
+
+pub fn unscaleLeaves(node: *CompiledTrie, divisor: Weight) void {
+    if (node.leaf.items.len > 0) {
+        unscaleLeaf(node.leaf.items, divisor);
+    }
+    for (node.children) |maybe_child| {
+        if (maybe_child) |child| {
+            unscaleLeaves(child, divisor);
+        }
+    }
+}
+
+pub fn normalise(node: *CompiledTrie) void {
+    const total_weight = sumLeaves(node);
+    unscaleLeaves(node, total_weight);
 }

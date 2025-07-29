@@ -20,11 +20,12 @@ pub fn main() !void {
     const wlr = word_list_file.reader();
     var dict_trie = compile.CompiledTrie.init(main_alloc);
     defer dict_trie.deinit();
-    var i: u32 = 0;
+    var i: compile.Weight = 0;
     while (try wlr.readUntilDelimiterOrEofAlloc(main_alloc, '\n', 128)) |line| {
         i += 1;
         try compile.contractAddWord(&dict_trie, subset, .{ .word = line, .weight = 1000 / i });
     }
+    compile.normalise(&dict_trie);
     const stdout_file = std.io.getStdOut().writer();
     var bw = std.io.bufferedWriter(stdout_file);
     const stdout = bw.writer();
