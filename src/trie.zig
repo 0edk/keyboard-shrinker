@@ -34,17 +34,19 @@ pub fn Trie(comptime K: type, comptime V: type) type {
             };
         }
 
-        pub fn deinit(self: *Self) void {
-            for (self.children) |maybe_child| {
-                if (maybe_child) |child| {
-                    child.deinit();
-                    self.allocator.destroy(child);
-                }
-            }
+        fn deinitBf(_: void, self: *Self) void {
+            self.allocator.destroy(self);
+        }
+
+        fn deinitLf(_: void, leaf: V) void {
             switch (@typeInfo(V)) {
-                .@"struct" => self.leaf.deinit(),
+                .@"struct" => leaf.deinit(),
                 else => {},
             }
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.deepForEach({}, Self.deinitBf, Self.deinitLf);
         }
 
         pub fn get(self: *Self, key: []const K) Allocator.Error!*Self {
@@ -58,6 +60,22 @@ pub fn Trie(comptime K: type, comptime V: type) type {
                     child.* = Self.init(self.allocator);
                     self.children[key[0]] = child;
                     return child.get(key[1..]);
+                }
+            }
+        }
+
+        pub fn deepForEach(self: *Self, context: anytype, bf: ?fn (@TypeOf(context), *Self) void, lf: ?fn (@TypeOf(context), V) void) void {
+            if (lf) |f| {
+                if (nonzero(V, self.leaf)) {
+                    f(context, self.leaf);
+                }
+            }
+            for (self.children) |maybe_child| {
+                if (maybe_child) |child| {
+                    child.deepForEach(context, bf, lf);
+                    if (bf) |f| {
+                        f(context, child);
+                    }
                 }
             }
         }

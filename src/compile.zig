@@ -5,7 +5,7 @@ const Allocator = std.mem.Allocator;
 const available_letters = 1 << @typeInfo(trie.Letter).int.bits;
 const LettersSubset = [available_letters]bool;
 pub const Weight = f64;
-const WeightedWord = struct { word: []const u8, weight: Weight };
+pub const WeightedWord = struct { word: []const u8, weight: Weight };
 pub const CompiledTrie = trie.Trie(trie.Letter, std.ArrayList(WeightedWord));
 
 fn contractOutput(subset: LettersSubset, alloc: Allocator, word: []const u8) Allocator.Error!std.ArrayList(trie.Letter) {
@@ -52,12 +52,14 @@ test "compile google100" {
     const wlr = word_list_file.reader();
     var dict_trie = CompiledTrie.init(std.testing.allocator);
     defer dict_trie.deinit();
-    var i: Weight = 0;
+    var i: usize = 0;
     const subset = charsToSubset("etao");
     while (try wlr.readUntilDelimiterOrEofAlloc(std.testing.allocator, '\n', 128)) |line| {
         i += 1;
-        try contractAddWord(&dict_trie, subset, .{ .word = line, .weight = i });
+        try contractAddWord(&dict_trie, subset, .{ .word = line, .weight = 1 / @as(f64, @floatFromInt(i)) });
     }
+    normalise(&dict_trie);
+    try std.testing.expectEqual(1.0, sumLeaves(&dict_trie));
     var it = try dict_trie.iterator();
     var found: usize = 0;
     while (try it.next()) |entry| {
@@ -93,24 +95,13 @@ fn sumLeaves(node: *const CompiledTrie) Weight {
     return total;
 }
 
-fn unscaleLeaf(leaf: []WeightedWord, divisor: Weight) void {
-    for (0..leaf.len) |i| {
-        leaf[i].weight /= divisor;
-    }
-}
-
-pub fn unscaleLeaves(node: *CompiledTrie, divisor: Weight) void {
-    if (node.leaf.items.len > 0) {
-        unscaleLeaf(node.leaf.items, divisor);
-    }
-    for (node.children) |maybe_child| {
-        if (maybe_child) |child| {
-            unscaleLeaves(child, divisor);
-        }
+fn unscaleLeaf(divisor: Weight, leaf: std.ArrayList(WeightedWord)) void {
+    for (0..leaf.items.len) |i| {
+        leaf.items[i].weight /= divisor;
     }
 }
 
 pub fn normalise(node: *CompiledTrie) void {
     const total_weight = sumLeaves(node);
-    unscaleLeaves(node, total_weight);
+    node.deepForEach(total_weight, null, unscaleLeaf);
 }

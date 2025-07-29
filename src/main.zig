@@ -23,7 +23,7 @@ pub fn main() !void {
     var i: compile.Weight = 0;
     while (try wlr.readUntilDelimiterOrEofAlloc(main_alloc, '\n', 128)) |line| {
         i += 1;
-        try compile.contractAddWord(&dict_trie, subset, .{ .word = line, .weight = 1000 / i });
+        try compile.contractAddWord(&dict_trie, subset, .{ .word = line, .weight = 1 / i });
     }
     compile.normalise(&dict_trie);
     const stdout_file = std.io.getStdOut().writer();
