@@ -4,10 +4,14 @@ const Allocator = std.mem.Allocator;
 
 fn badnessLeaf(leaf: []const compile.WeightedWord) compile.Weight {
     var total: compile.Weight = 0;
-    for (leaf[1..]) |ww| {
+    var max: compile.Weight = 0;
+    for (leaf) |ww| {
+        if (ww.weight > max) {
+            max = ww.weight;
+        }
         total += ww.weight;
     }
-    return total * @as(f64, @floatFromInt(leaf.len));
+    return (total - max) * @as(f64, @floatFromInt(leaf.len));
 }
 
 pub fn badnessLeaves(node: *const compile.CompiledTrie) compile.Weight {
@@ -26,7 +30,6 @@ fn freeWords(allocator: Allocator, leaf: std.ArrayList(compile.WeightedWord)) vo
     }
 }
 
-// TODO: result looks wrong
 test "score google100" {
     const word_list_file = try std.fs.cwd().openFile("dicts/google_100", .{});
     const wlr = word_list_file.reader();

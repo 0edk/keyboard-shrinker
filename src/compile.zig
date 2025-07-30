@@ -40,7 +40,6 @@ pub fn contractAddWord(node: *CompiledTrie, subset: LettersSubset, ww: WeightedW
     var child: *CompiledTrie = try node.get(contracted.items);
     if (child.leaf.items.len > 0) {
         try (&child.leaf).append(ww);
-        std.mem.sort(WeightedWord, child.leaf.items, {}, lessThanWord);
     } else {
         child.leaf = std.ArrayList(WeightedWord).init(child.allocator);
         try child.leaf.append(ww);
