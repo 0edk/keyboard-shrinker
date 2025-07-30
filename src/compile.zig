@@ -2,8 +2,8 @@ const std = @import("std");
 const trie = @import("trie.zig");
 const Allocator = std.mem.Allocator;
 
-const available_letters = 1 << @typeInfo(trie.Letter).int.bits;
-const LettersSubset = [available_letters]bool;
+pub const available_letters = 1 << @typeInfo(trie.Letter).int.bits;
+pub const LettersSubset = std.bit_set.IntegerBitSet(available_letters);
 pub const Weight = f64;
 pub const WeightedWord = struct { word: []const u8, weight: Weight };
 pub const CompiledTrie = trie.Trie(trie.Letter, std.ArrayList(WeightedWord));
@@ -12,7 +12,7 @@ fn contractOutput(subset: LettersSubset, alloc: Allocator, word: []const u8) All
     var subword = std.ArrayList(trie.Letter).init(alloc);
     for (word) |c| {
         if (trie.charToLetter(c)) |l| {
-            if (subset[l]) {
+            if (subset.isSet(l)) {
                 try subword.append(l);
             }
         }
@@ -21,10 +21,10 @@ fn contractOutput(subset: LettersSubset, alloc: Allocator, word: []const u8) All
 }
 
 pub fn charsToSubset(str: []const u8) LettersSubset {
-    var set: LettersSubset = [_]bool{false} ** available_letters;
+    var set: LettersSubset = LettersSubset.initEmpty();
     for (str) |c| {
         if (trie.charToLetter(c)) |l| {
-            set[l] = true;
+            set.set(l);
         }
     }
     return set;

@@ -1,6 +1,9 @@
 const std = @import("std");
 const compile = @import("compile.zig");
+const trie = @import("trie.zig");
 const Allocator = std.mem.Allocator;
+
+pub const WordList = std.StringHashMap(compile.WeightedWord);
 
 fn badnessLeaf(leaf: []const compile.WeightedWord) compile.Weight {
     var total: compile.Weight = 0;
@@ -44,4 +47,51 @@ test "score google100" {
     compile.normalise(&dict_trie);
     std.debug.print("badness {d}\n", .{badnessLeaves(&dict_trie)});
     dict_trie.deepForEach(dict_trie.allocator, null, freeWords);
+}
+
+pub fn badnessSubset(words: WordList, subset: compile.LettersSubset) Allocator.Error!compile.Weight {
+    var dict_trie = compile.CompiledTrie.init(words.allocator);
+    defer dict_trie.deinit();
+    var it = words.iterator();
+    while (it.next()) |entry| {
+        try compile.contractAddWord(&dict_trie, subset, entry.value_ptr.*);
+    }
+    compile.normalise(&dict_trie);
+    return badnessLeaves(&dict_trie);
+}
+
+pub fn climbStep(words: WordList, start: compile.LettersSubset, shrink: bool) Allocator.Error!?trie.Letter {
+    var best: struct { ?trie.Letter, compile.Weight } = .{ null, std.math.inf(compile.Weight) };
+    var trial = start;
+    for (0..compile.available_letters) |i| {
+        if (shrink == start.isSet(i)) {
+            trial.toggle(i);
+            const b = try badnessSubset(words, trial);
+            if (b < best[1]) {
+                best = .{ @intCast(i), b };
+            }
+            trial.toggle(i);
+        }
+    }
+    return best[0];
+}
+
+pub fn climbToLen(words: WordList, start: compile.LettersSubset, target: trie.Letter) Allocator.Error!compile.LettersSubset {
+    const source = start.count();
+    var climber = start;
+    if (source < target) {
+        for (source..target) |_| {
+            if (try climbStep(words, climber, false)) |l| {
+                climber.set(l);
+            }
+        }
+    } else if (source > target) {
+        for (target..source) |_| {
+            if (try climbStep(words, climber, true)) |l| {
+                climber.unset(l);
+            }
+        }
+    }
+    std.debug.assert(climber.count() == target);
+    return climber;
 }
