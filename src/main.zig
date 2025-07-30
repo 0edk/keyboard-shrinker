@@ -23,30 +23,41 @@ pub fn main() !void {
     const word_list_file = try std.fs.cwd().openFile(word_list_filename, .{});
     const wlr = word_list_file.reader();
     var word_list = std.StringHashMap(compile.WeightedWord).init(main_alloc);
-    var i: compile.Weight = 0;
+    var wc: compile.Weight = 0;
     while (try wlr.readUntilDelimiterOrEofAlloc(main_alloc, '\n', 128)) |line| {
-        i += 1;
+        wc += 1;
         const lowered = try std.ascii.allocLowerString(main_alloc, line);
         if (word_list.getPtr(lowered)) |ww| {
-            ww.weight += 1 / i;
+            ww.weight += 1 / wc;
         } else {
-            try word_list.put(lowered, .{ .word = line, .weight = 1 / i });
+            try word_list.put(lowered, .{ .word = line, .weight = 1 / wc });
         }
     }
-    std.debug.print("loaded {d} words\n", .{i});
+    std.debug.print("loaded {d} words\n", .{wc});
 
     var buf: [32]u8 = undefined;
     while (try stdin.readUntilDelimiterOrEof(&buf, '\n')) |line| {
-        var dict_trie = compile.CompiledTrie.init(main_alloc);
-        defer dict_trie.deinit();
         const letters = try trie.charsToLetters(main_alloc, line);
         defer letters.deinit();
-        var it = word_list.iterator();
-        while (it.next()) |entry| {
-            try compile.contractAddWord(&dict_trie, compile.charsToSubset(line), entry.value_ptr.*);
+        var subset = compile.charsToSubset(line);
+        var best: struct { u8, compile.Weight } = .{'a', std.math.inf(compile.Weight)};
+        for (0..alphabet.len, alphabet) |i, c| {
+            subset[i] = !subset[i];
+            var dict_trie = compile.CompiledTrie.init(main_alloc);
+            defer dict_trie.deinit();
+            var it = word_list.iterator();
+            while (it.next()) |entry| {
+                try compile.contractAddWord(&dict_trie, subset, entry.value_ptr.*);
+            }
+            compile.normalise(&dict_trie);
+            const badness = score.badnessLeaves(&dict_trie);
+            if (badness < best[1]) {
+                best = .{c, badness};
+            }
+            try stdout.print("{u}\t{d:.2}\n", .{c, @log(badness)});
+            subset[i] = !subset[i];
         }
-        compile.normalise(&dict_trie);
-        try stdout.print("{d}\n", .{score.badnessLeaves(&dict_trie)});
+        try stdout.print("best\t{u}\n", .{best[0]});
         try bw.flush();
     }
 }
