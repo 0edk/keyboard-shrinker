@@ -58,8 +58,10 @@ pub fn badnessSubset(
     words: WordList,
     subset: compile.LettersSubset,
 ) Allocator.Error!compile.Weight {
-    var dict_trie = compile.CompiledTrie.init(words.allocator);
-    defer dict_trie.deinit();
+    var arena = std.heap.ArenaAllocator.init(words.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    var dict_trie = compile.CompiledTrie.init(alloc);
     var it = words.iterator();
     while (it.next()) |entry| {
         try compile.contractAddWord(&dict_trie, subset, entry.value_ptr.*);
@@ -124,7 +126,7 @@ test "optimise google100" {
         try word_list.put(line, .{ .word = line, .weight = 1 / i });
     }
     const start_subset = compile.charsToSubset("etao");
-    std.debug.print("{any} -> {any}\n", .{start_subset, climbToLen(word_list, start_subset, 8)});
+    std.debug.print("{any} -> {any}\n", .{ start_subset, climbToLen(word_list, start_subset, 8) });
     var it = word_list.iterator();
     while (it.next()) |entry| {
         std.testing.allocator.free(entry.value_ptr.word);
