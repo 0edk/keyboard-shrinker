@@ -1,15 +1,6 @@
 const std = @import("std");
+const letters = @import("letters.zig");
 const Allocator = std.mem.Allocator;
-const String = std.ArrayList(u8);
-
-fn default(comptime T: type) T {
-    return switch (@typeInfo(T)) {
-        .int => 0,
-        .optional => null,
-        .@"struct" => T.init(undefined),
-        else => unreachable,
-    };
-}
 
 fn nonzero(comptime T: type, x: T) bool {
     return switch (@typeInfo(T)) {
@@ -24,7 +15,7 @@ pub fn Trie(comptime K: type, comptime V: type) type {
     return struct {
         const Self = @This();
         const N = 1 << @typeInfo(K).int.bits;
-        leaf: V = default(V),
+        leaf: ?V = null,
         children: [N]?*Self = [_]?*Self{null} ** N,
         allocator: Allocator,
 
@@ -40,7 +31,10 @@ pub fn Trie(comptime K: type, comptime V: type) type {
 
         fn deinitLf(_: void, leaf: V) void {
             switch (@typeInfo(V)) {
-                .@"struct" => leaf.deinit(),
+                .optional => if (leaf) |l| Self.deinitLf({}, l),
+                .@"struct" => if (@hasDecl(V, "deinit")) {
+                    leaf.deinit();
+                },
                 else => {},
             }
         }
@@ -64,18 +58,23 @@ pub fn Trie(comptime K: type, comptime V: type) type {
             }
         }
 
-        pub fn deepForEach(self: *Self, context: anytype, bf: ?fn (@TypeOf(context), *Self) void, lf: ?fn (@TypeOf(context), V) void) void {
-            if (lf) |f| {
-                if (nonzero(V, self.leaf)) {
-                    f(context, self.leaf);
-                }
-            }
+        pub fn deepForEach(
+            self: *Self,
+            context: anytype,
+            bf: ?fn (@TypeOf(context), *Self) void,
+            lf: ?fn (@TypeOf(context), V) void,
+        ) void {
             for (self.children) |maybe_child| {
                 if (maybe_child) |child| {
                     child.deepForEach(context, bf, lf);
                     if (bf) |f| {
                         f(context, child);
                     }
+                }
+            }
+            if (lf) |f| {
+                if (self.leaf) |l| {
+                    f(context, l);
                 }
             }
         }
@@ -129,7 +128,7 @@ fn Iterator(comptime K: type, comptime V: type) type {
                     if (top.node.children[i]) |child| {
                         self.stack.items[self.stack.items.len - 1].start = @intCast(i + 1);
                         try self.stack.append(.{ .start = 0, .node = child });
-                        if (nonzero(V, child.leaf)) {
+                        if (child.leaf) |l| {
                             const n = self.stack.items.len;
                             var s = try top.node.allocator.alloc(K, n - 1);
                             for (0..(n - 1)) |j| {
@@ -137,7 +136,7 @@ fn Iterator(comptime K: type, comptime V: type) type {
                             }
                             return .{
                                 .key = s,
-                                .value = child.leaf,
+                                .value = l,
                                 .node = child,
                                 .allocator = top.node.allocator,
                             };
@@ -146,13 +145,15 @@ fn Iterator(comptime K: type, comptime V: type) type {
                     }
                 } else {
                     const root = self.stack.pop().?.node;
-                    if (self.stack.items.len == 0 and nonzero(V, root.leaf)) {
-                        return .{
-                            .key = &[_]K{},
-                            .value = root.leaf,
-                            .node = root,
-                            .allocator = root.allocator,
-                        };
+                    if (self.stack.items.len == 0) {
+                        if (root.leaf) |l| {
+                            return .{
+                                .key = &[_]K{},
+                                .value = l,
+                                .node = root,
+                                .allocator = root.allocator,
+                            };
+                        }
                     }
                 }
             }
@@ -162,8 +163,7 @@ fn Iterator(comptime K: type, comptime V: type) type {
     };
 }
 
-pub const Letter = u5;
-pub const WordTrie = Trie(Letter, u32);
+pub const WordTrie = Trie(letters.Letter, u32);
 
 test "trie on string" {
     var trie = Trie(u8, u8).init(std.testing.allocator);
@@ -171,36 +171,10 @@ test "trie on string" {
     const words = [_][]const u8{ "a", "to", "tea", "ted", "ten", "i", "in", "inn" };
     for (words) |word| {
         const branch = try trie.get(word);
-        branch.leaf += 1;
+        branch.leaf = 1;
     }
     for (words) |word| {
         try std.testing.expectEqual(1, (try trie.get(word)).leaf);
     }
     try trie.show(void, 0);
-}
-
-pub fn charToLetter(char: u8) ?Letter {
-    if (std.ascii.isAlphabetic(char)) {
-        return @intCast(std.ascii.toLower(char) - 'a');
-    }
-    return null;
-}
-
-pub fn charsToLetters(allocator: Allocator, str: []const u8) Allocator.Error!std.ArrayList(Letter) {
-    var projected = std.ArrayList(Letter).init(allocator);
-    for (str) |c| {
-        if (charToLetter(c)) |l| {
-            try projected.append(l);
-        }
-    }
-    return projected;
-}
-
-pub fn lettersToChars(allocator: Allocator, letters: []const Letter) Allocator.Error!std.ArrayList(u8) {
-    var s = try String.initCapacity(allocator, letters.len);
-    for (letters) |l| {
-        const c: u8 = l;
-        try s.append(c + 'a');
-    }
-    return s;
 }

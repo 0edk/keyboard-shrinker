@@ -1,9 +1,10 @@
 const std = @import("std");
+const letters = @import("letters.zig");
 const trie = @import("trie.zig");
 const compile = @import("compile.zig");
 const score = @import("score.zig");
 const Allocator = std.mem.Allocator;
-const Word = []const trie.Letter;
+const Word = []const letters.Letter;
 const alphabet = "abcdefghijklmnopqrstuvwxyz";
 
 fn showSubset(writer: anytype, set: compile.LettersSubset) !void {
@@ -37,6 +38,7 @@ pub fn main() !void {
         const lowered = try std.ascii.allocLowerString(main_alloc, line);
         if (word_list.getPtr(lowered)) |ww| {
             ww.weight += 1 / wc;
+            main_alloc.free(lowered);
         } else {
             try word_list.put(lowered, .{ .word = line, .weight = 1 / wc });
         }
@@ -44,7 +46,7 @@ pub fn main() !void {
     std.debug.print("loaded {d} words\n", .{wc});
 
     var buf: [32]u8 = undefined;
-    var rng = std.Random.DefaultPrng.init(395021025);
+    var rng = std.Random.DefaultPrng.init(20520420150291);
     var rand = rng.random();
     while (try stdin.readUntilDelimiterOrEof(&buf, '\n')) |line| {
         _ = line;
@@ -59,5 +61,11 @@ pub fn main() !void {
         const final_score = try score.badnessSubset(word_list, final_subset);
         try stdout.print(" ({d})\n", .{final_score});
         try bw.flush();
+    }
+
+    var it = word_list.iterator();
+    while (it.next()) |entry| {
+        main_alloc.free(entry.key_ptr.*);
+        main_alloc.free(entry.value_ptr.word);
     }
 }
