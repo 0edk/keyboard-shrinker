@@ -35,10 +35,6 @@ pub fn charsToSubset(str: []const u8) LettersSubset {
     return set;
 }
 
-fn lessThanWord(_: void, lhs: WeightedWord, rhs: WeightedWord) bool {
-    return lhs.weight > rhs.weight;
-}
-
 pub fn contractAddWord(
     node: *CompiledTrie,
     subset: LettersSubset,

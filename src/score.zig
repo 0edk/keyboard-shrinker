@@ -6,16 +6,18 @@ const Allocator = std.mem.Allocator;
 
 pub const WordList = std.StringHashMap(compile.WeightedWord);
 
-fn badnessLeaf(leaf: []const compile.WeightedWord) compile.Weight {
+pub fn lessThanWord(_: void, lhs: compile.WeightedWord, rhs: compile.WeightedWord) bool {
+    return lhs.weight > rhs.weight;
+}
+
+fn badnessLeaf(leaf: []compile.WeightedWord) compile.Weight {
+    std.mem.sort(compile.WeightedWord, leaf, {}, lessThanWord);
     var total: compile.Weight = 0;
-    var max: compile.Weight = 0;
-    for (leaf) |ww| {
-        if (ww.weight > max) {
-            max = ww.weight;
-        }
-        total += ww.weight;
+    for (0..leaf.len, leaf) |i, ww| {
+        const k: compile.Weight = @floatFromInt(i);
+        total += k * ww.weight;
     }
-    return (total - max) * @as(f64, @floatFromInt(leaf.len));
+    return total;
 }
 
 pub fn badnessLeaves(node: *const compile.CompiledTrie) compile.Weight {
