@@ -4,20 +4,22 @@ const trie = @import("trie.zig");
 const compile = @import("compile.zig");
 const Allocator = std.mem.Allocator;
 
-fn badnessLeaf(leaf: []compile.WeightedWord) compile.Weight {
+fn badnessLeaf(leaf: []compile.WeightedWord, depth: compile.Weight) compile.Weight {
+    var prob: compile.Weight = 0;
     var total: compile.Weight = 0;
     for (0..leaf.len, leaf) |i, ww| {
-        const k: compile.Weight = @floatFromInt(i);
+        const k: compile.Weight = @floatFromInt(if (depth == 0) i + 1 else i);
+        prob += ww.weight;
         total += k * ww.weight;
     }
-    return total;
+    return depth * prob + total;
 }
 
-pub fn badnessLeaves(node: *const compile.CompiledTrie) compile.Weight {
-    var total = if (node.leaf) |l| badnessLeaf(l.items) else 0;
+pub fn badnessLeaves(node: *const compile.CompiledTrie, depth: compile.Weight) compile.Weight {
+    var total = if (node.leaf) |l| badnessLeaf(l.items, depth) else 0;
     for (node.children) |maybe_child| {
         if (maybe_child) |child| {
-            total += badnessLeaves(child);
+            total += badnessLeaves(child, depth + 1);
         }
     }
     return total;
@@ -39,7 +41,7 @@ test "score google100" {
         );
     }
     compile.normalise(&dict_trie);
-    std.debug.print("badness {d}\n", .{badnessLeaves(&dict_trie)});
+    std.debug.print("badness {d}\n", .{badnessLeaves(&dict_trie, 0)});
     dict_trie.deepForEach(dict_trie.allocator, null, compile.freeWords);
 }
 
@@ -56,7 +58,7 @@ pub fn badnessSubset(
         try compile.contractAddWord(&dict_trie, subset, entry.value_ptr.*);
     }
     compile.normalise(&dict_trie);
-    const badness = badnessLeaves(&dict_trie);
+    const badness = badnessLeaves(&dict_trie, 0);
     return badness;
 }
 

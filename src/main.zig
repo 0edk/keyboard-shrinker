@@ -86,7 +86,7 @@ pub fn main() !void {
     try compile.loadWords(&dict_trie, default_subset, word_list);
 
     while (try stdin.readUntilDelimiterOrEof(&buf, '\n')) |line| {
-        if (true) {
+        if (false) {
             const input_letters = try letters.charsToLetters(main_alloc, line);
             defer input_letters.deinit();
             if ((try dict_trie.get(input_letters.items)).leaf) |matches| {
@@ -113,7 +113,7 @@ pub fn main() !void {
             try showSubset(stdout, climb_subset);
             try stdout.print(" ->\n", .{});
             try bw.flush();
-            while (climb_subset.count() < 12) {
+            while (climb_subset.count() < 14) {
                 climb_subset.set(try score.climbStep(word_list, climb_subset, false) orelse break);
                 try showSubset(stdout, climb_subset);
                 try stdout.print(" ({d})\n", .{try score.badnessSubset(word_list, climb_subset)});
