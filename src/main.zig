@@ -5,7 +5,8 @@ const compile = @import("compile.zig");
 const score = @import("score.zig");
 const Allocator = std.mem.Allocator;
 const Word = []const letters.Letter;
-const alphabet = "abcdefghijklmnopqrstuvwxyz";
+const alphabet = "abcdefghijklmnopqrstuvwxyz'_";
+const default_keys = "acdeinorst";
 
 fn showSubset(writer: anytype, set: compile.LettersSubset) !void {
     for (0..alphabet.len, alphabet) |i, c| {
@@ -44,7 +45,7 @@ pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(main_alloc);
     defer arena.deinit();
     const wl_alloc = arena.allocator();
-    std.debug.print("loading from '{s}'\n", .{ word_list_filename });
+    std.debug.print("loading from '{s}'\n", .{word_list_filename});
     const word_list_file = try std.fs.cwd().openFile(word_list_filename, .{});
     const wlr = word_list_file.reader();
     var word_list = score.WordList.init(main_alloc);
@@ -54,7 +55,7 @@ pub fn main() !void {
         var word: []const u8 = undefined;
         var weight: compile.Weight = undefined;
         if (std.mem.indexOf(u8, after_indent, " ")) |sep| {
-            word = after_indent[sep + 1..];
+            word = after_indent[sep + 1 ..];
             weight = @floatFromInt(try std.fmt.parseInt(usize, after_indent[0..sep], 10));
         } else {
             word = after_indent;
@@ -79,9 +80,8 @@ pub fn main() !void {
     var rng = std.Random.DefaultPrng.init(seed);
     var rand = rng.random();
 
-    const default_chars = "arstneio";
-    const default_subset = compile.charsToSubset(default_chars);
-    std.debug.print("using subset '{s}'\n", .{default_chars});
+    const default_subset = compile.charsToSubset(default_keys);
+    std.debug.print("using subset '{s}'\n", .{default_keys});
     var dict_trie = compile.CompiledTrie.init(main_alloc);
     var it = word_list.iterator();
     while (it.next()) |entry| {
@@ -99,30 +99,31 @@ pub fn main() !void {
                     try stdout.print("{s}\t{d}\n", .{ ww.word, ww.weight });
                 }
             } else {
-                try stdout.print("{s}\t0\n", .{ line });
+                try stdout.print("{s}\t0\n", .{line});
             }
             try bw.flush();
         } else {
-            var start_subset = compile.LettersSubset.initEmpty();
+            var climb_subset = compile.LettersSubset.initEmpty();
             if (line.len > 0) {
                 for (line) |c| {
                     if (letters.charToLetter(c)) |l| {
-                        start_subset.set(l);
+                        climb_subset.set(l);
                     }
                 }
             } else {
                 for (0..alphabet.len) |i| {
-                    start_subset.setValue(i, rand.boolean());
+                    climb_subset.setValue(i, rand.boolean());
                 }
             }
-            try showSubset(stdout, start_subset);
-            try stdout.print(" -> ", .{});
+            try showSubset(stdout, climb_subset);
+            try stdout.print(" ->\n", .{});
             try bw.flush();
-            const final_subset = try score.climbToLen(word_list, start_subset, 8);
-            try showSubset(stdout, final_subset);
-            const final_score = try score.badnessSubset(word_list, final_subset);
-            try stdout.print(" ({d})\n", .{final_score});
-            try bw.flush();
+            while (climb_subset.count() < 12) {
+                climb_subset.set(try score.climbStep(word_list, climb_subset, false) orelse break);
+                try showSubset(stdout, climb_subset);
+                try stdout.print(" ({d})\n", .{try score.badnessSubset(word_list, climb_subset)});
+                try bw.flush();
+            }
         }
     }
 }
