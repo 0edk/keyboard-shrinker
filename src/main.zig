@@ -16,14 +16,14 @@ fn showSubset(writer: anytype, set: compile.LettersSubset) !void {
     }
 }
 
-fn sortLeaf(_: void, leaf: std.ArrayList(compile.WeightedWord)) void {
-    std.mem.sort(compile.WeightedWord, leaf.items, {}, score.lessThanWord);
-}
-
 fn partlyUpper(s: []const u8) bool {
-    var n: usize = 0;
-    for (s) |c| n += @intFromBool(std.ascii.isUpper(c));
-    return n > 0 and n < s.len;
+    var uppers: usize = 0;
+    var lowers: usize = 0;
+    for (s) |c| {
+        uppers += @intFromBool(std.ascii.isUpper(c));
+        lowers += @intFromBool(std.ascii.isLower(c));
+    }
+    return uppers > 0 and lowers < 0;
 }
 
 pub fn main() !void {
@@ -48,7 +48,7 @@ pub fn main() !void {
     std.debug.print("loading from '{s}'\n", .{word_list_filename});
     const word_list_file = try std.fs.cwd().openFile(word_list_filename, .{});
     const wlr = word_list_file.reader();
-    var word_list = score.WordList.init(main_alloc);
+    var word_list = compile.WordList.init(main_alloc);
     var wc: compile.Weight = 1;
     while (try wlr.readUntilDelimiterOrEofAlloc(main_alloc, '\n', 128)) |line| {
         const after_indent = std.mem.trim(u8, line, " \t");
@@ -83,12 +83,7 @@ pub fn main() !void {
     const default_subset = compile.charsToSubset(default_keys);
     std.debug.print("using subset '{s}'\n", .{default_keys});
     var dict_trie = compile.CompiledTrie.init(main_alloc);
-    var it = word_list.iterator();
-    while (it.next()) |entry| {
-        try compile.contractAddWord(&dict_trie, default_subset, entry.value_ptr.*);
-    }
-    compile.normalise(&dict_trie);
-    dict_trie.deepForEach({}, null, sortLeaf);
+    try compile.loadWords(&dict_trie, default_subset, word_list);
 
     while (try stdin.readUntilDelimiterOrEof(&buf, '\n')) |line| {
         if (true) {

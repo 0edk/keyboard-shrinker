@@ -113,7 +113,7 @@ fn Entry(comptime K: type, comptime V: type) type {
     };
 }
 
-fn IteratorLayer(comptime K: type, comptime V: type) type {
+pub fn IteratorLayer(comptime K: type, comptime V: type) type {
     return struct { start: K, node: *Trie(K, V) };
 }
 

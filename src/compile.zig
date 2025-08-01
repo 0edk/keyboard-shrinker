@@ -8,6 +8,7 @@ pub const LettersSubset = std.bit_set.IntegerBitSet(available_letters);
 pub const Weight = f64;
 pub const WeightedWord = struct { word: []const u8, weight: Weight };
 pub const CompiledTrie = trie.Trie(letters.Letter, std.ArrayList(WeightedWord));
+pub const WordList = std.StringHashMap(WeightedWord);
 
 fn contractOutput(
     subset: LettersSubset,
@@ -33,6 +34,12 @@ pub fn charsToSubset(str: []const u8) LettersSubset {
         }
     }
     return set;
+}
+
+pub fn freeWords(allocator: Allocator, leaf: std.ArrayList(WeightedWord)) void {
+    for (leaf.items) |ww| {
+        allocator.free(ww.word);
+    }
 }
 
 pub fn contractAddWord(
@@ -110,4 +117,21 @@ fn unscaleLeaf(divisor: Weight, leaf: std.ArrayList(WeightedWord)) void {
 pub fn normalise(node: *CompiledTrie) void {
     const total_weight = sumLeaves(node);
     node.deepForEach(total_weight, null, unscaleLeaf);
+}
+
+fn lessThanWord(_: void, lhs: WeightedWord, rhs: WeightedWord) bool {
+    return lhs.weight > rhs.weight;
+}
+
+pub fn sortLeaf(_: void, leaf: std.ArrayList(WeightedWord)) void {
+    std.mem.sort(WeightedWord, leaf.items, {}, lessThanWord);
+}
+
+pub fn loadWords(node: *CompiledTrie, subset: LettersSubset, words: WordList) Allocator.Error!void {
+    var it = words.iterator();
+    while (it.next()) |entry| {
+        try contractAddWord(node, subset, entry.value_ptr.*);
+    }
+    normalise(node);
+    node.deepForEach({}, null, sortLeaf);
 }

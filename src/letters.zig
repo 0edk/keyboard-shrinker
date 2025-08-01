@@ -1,6 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const String = std.ArrayList(u8);
+pub const String = std.ArrayList(u8);
 
 pub const Letter = u5;
 

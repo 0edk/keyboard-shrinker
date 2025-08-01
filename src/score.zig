@@ -4,14 +4,7 @@ const trie = @import("trie.zig");
 const compile = @import("compile.zig");
 const Allocator = std.mem.Allocator;
 
-pub const WordList = std.StringHashMap(compile.WeightedWord);
-
-pub fn lessThanWord(_: void, lhs: compile.WeightedWord, rhs: compile.WeightedWord) bool {
-    return lhs.weight > rhs.weight;
-}
-
 fn badnessLeaf(leaf: []compile.WeightedWord) compile.Weight {
-    std.mem.sort(compile.WeightedWord, leaf, {}, lessThanWord);
     var total: compile.Weight = 0;
     for (0..leaf.len, leaf) |i, ww| {
         const k: compile.Weight = @floatFromInt(i);
@@ -28,12 +21,6 @@ pub fn badnessLeaves(node: *const compile.CompiledTrie) compile.Weight {
         }
     }
     return total;
-}
-
-fn freeWords(allocator: Allocator, leaf: std.ArrayList(compile.WeightedWord)) void {
-    for (leaf.items) |ww| {
-        allocator.free(ww.word);
-    }
 }
 
 test "score google100" {
@@ -53,11 +40,11 @@ test "score google100" {
     }
     compile.normalise(&dict_trie);
     std.debug.print("badness {d}\n", .{badnessLeaves(&dict_trie)});
-    dict_trie.deepForEach(dict_trie.allocator, null, freeWords);
+    dict_trie.deepForEach(dict_trie.allocator, null, compile.freeWords);
 }
 
 pub fn badnessSubset(
-    words: WordList,
+    words: compile.WordList,
     subset: compile.LettersSubset,
 ) Allocator.Error!compile.Weight {
     var arena = std.heap.ArenaAllocator.init(words.allocator);
@@ -74,7 +61,7 @@ pub fn badnessSubset(
 }
 
 pub fn climbStep(
-    words: WordList,
+    words: compile.WordList,
     start: compile.LettersSubset,
     shrink: bool,
 ) Allocator.Error!?letters.Letter {
@@ -94,7 +81,7 @@ pub fn climbStep(
 }
 
 pub fn climbToLen(
-    words: WordList,
+    words: compile.WordList,
     start: compile.LettersSubset,
     target: letters.Letter,
 ) Allocator.Error!compile.LettersSubset {
@@ -120,7 +107,7 @@ pub fn climbToLen(
 test "optimise google100" {
     const word_list_file = try std.fs.cwd().openFile("dicts/google_100", .{});
     const wlr = word_list_file.reader();
-    var word_list = WordList.init(std.testing.allocator);
+    var word_list = compile.WordList.init(std.testing.allocator);
     defer word_list.deinit();
     var i: compile.Weight = 0;
     while (try wlr.readUntilDelimiterOrEofAlloc(std.testing.allocator, '\n', 128)) |line| {
