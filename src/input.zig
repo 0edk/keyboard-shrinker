@@ -94,10 +94,35 @@ pub const ShrunkenInputMethod = struct {
     }
 
     pub fn finishWord(self: *Self, next: ?u8) Allocator.Error![]u8 {
+        const maybe_new = self.literal.items.len > 0 or
+            if (self.dict.getOrNull(self.query.items)) |node| node.leaf == null else true;
         try self.literalise();
         self.mode = .normal;
         self.casing = .title;
         self.choice = 0;
+        if (maybe_new) {
+            const contracted = try compile.contractOutput(
+                self.usable_keys,
+                self.dict.allocator,
+                self.literal.items,
+            );
+            defer contracted.deinit();
+            var node = try self.dict.get(contracted.items);
+            if (node.leaf == null) {
+                node.leaf = std.ArrayList(compile.WeightedWord).init(self.dict.allocator);
+            }
+            for (node.leaf.?.items) |ww| {
+                if (std.mem.eql(u8, ww.word, self.literal.items)) {
+                    break;
+                }
+            } else {
+                const precedent = if (node.leaf.?.items.len > 0) node.leaf.?.items[0].weight else 1;
+                try node.leaf.?.insert(0, .{
+                    .word = try self.dict.allocator.dupe(u8, self.literal.items),
+                    .weight = precedent,
+                });
+            }
+        }
         if (next) |c| try self.literal.append(c);
         return self.literal.toOwnedSlice();
     }
@@ -156,7 +181,7 @@ pub const ShrunkenInputMethod = struct {
                     self.choice += 1;
                 },
                 .previous => {
-                    self.choice -= 1;
+                    self.choice -|= 1;
                 },
                 // TODO
                 .deter => return .silent,

@@ -62,6 +62,10 @@ fn note(s: []const u8) void {
     std.debug.print("{s}\n", .{s});
 }
 
+fn moveTo(stdout: anytype, row: usize, col: usize) !void {
+    return stdout.print("\x1b[{d};{d}H", .{ row, col });
+}
+
 pub fn main() !void {
     var debug_alloc = std.heap.DebugAllocator(.{}).init;
     const main_alloc = debug_alloc.allocator();
@@ -137,39 +141,45 @@ pub fn main() !void {
     var short_buf: [1]u8 = undefined;
     while (try stdin.read(&short_buf) == 1 and short_buf[0] != 3 and short_buf[0] != 4) {
         const next_char = short_buf[0];
-        if (dvorak.charToNormal(next_char)) |normal_action| {
+        if (next_char >= 1 and next_char <= 26) {
+            switch (next_char) {
+                '\n', '\r' => {
+                    try input_acc.append('\n');
+                    typing_row += 1;
+                    word_column = 1;
+                    try stdout.writeByte('\n');
+                    try moveTo(stdout, typing_row, word_column);
+                    try bw.flush();
+                },
+                else => {},
+            }
+        } else if (dvorak.charToNormal(next_char)) |normal_action| {
             if (dvorak.charToInsert(next_char)) |insert_action| {
                 try log_writer.print("{any} {any}\n", .{ insert_action, normal_action });
                 switch (try ime.handleAction(insert_action, normal_action, false)) {
                     .silent => {
+                        try moveTo(stdout, typing_row, word_column);
                         try stdout.print(
-                            "\x1b[{d};{d}H\x1b[0K\x1b[4m{s}\x1b[1m{s}\x1b[0m",
-                            .{ typing_row, word_column, ime.literal.items, try ime.getCompletion() },
+                            "\x1b[0K\x1b[4m{s}\x1b[1m{s}\x1b[0m",
+                            .{ ime.literal.items, try ime.getCompletion() },
                         );
                         try bw.flush();
                     },
                     .text => |s| {
                         defer main_alloc.free(s);
                         try input_acc.appendSlice(s);
-                        var it = std.mem.splitScalar(u8, s, '\n');
-                        var first = true;
-                        while (it.next()) |line| {
-                            if (!first) {
-                                typing_row += 1;
-                            }
-                            try stdout.print("\x1b[{d};{d}H{s}", .{ typing_row, word_column, s });
-                            word_column = line.len + if (first) word_column else 1;
-                            first = false;
-                        }
+                        try moveTo(stdout, typing_row, word_column);
+                        try stdout.writeAll(s);
+                        word_column += s.len;
                         try bw.flush();
                     },
-                    .pass => switch (next_char) {
-                        0x08, 0x7F => if (input_acc.pop()) |_| {
+                    .pass => if (ime.mode == .normal and normal_action == .backspace) {
+                        if (input_acc.pop()) |_| {
                             word_column -= 1;
-                            try stdout.print("\x1b[{d};{d}H ", .{ typing_row, word_column });
+                            try moveTo(stdout, typing_row, word_column);
+                            try stdout.writeByte(' ');
                             try bw.flush();
-                        },
-                        else => {},
+                        }
                     },
                 }
             }

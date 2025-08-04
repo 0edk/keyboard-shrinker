@@ -10,7 +10,7 @@ pub const WeightedWord = struct { word: []const u8, weight: Weight };
 pub const CompiledTrie = trie.Trie(letters.Letter, std.ArrayList(WeightedWord));
 pub const WordList = std.StringHashMap(WeightedWord);
 
-fn contractOutput(
+pub fn contractOutput(
     subset: LettersSubset,
     alloc: Allocator,
     word: []const u8,
