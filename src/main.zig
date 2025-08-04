@@ -1,4 +1,5 @@
 const std = @import("std");
+const ansi = @import("ansi.zig");
 const letters = @import("letters.zig");
 const trie = @import("trie.zig");
 const compile = @import("compile.zig");
@@ -27,43 +28,8 @@ fn partlyUpper(s: []const u8) bool {
     return uppers > 0 and lowers < 0;
 }
 
-// https://ziggit.dev/t/how-to-read-arrow-key/7405
-fn enableRawMode() !std.posix.termios {
-    const original = try std.posix.tcgetattr(std.posix.STDIN_FILENO);
-    var raw = original;
-    raw.iflag.IGNBRK = false;
-    raw.iflag.BRKINT = false;
-    raw.iflag.PARMRK = false;
-    raw.iflag.INLCR = false;
-    raw.iflag.IGNCR = false;
-    raw.iflag.ICRNL = false;
-    raw.iflag.ISTRIP = false;
-    raw.iflag.IXON = false;
-    raw.oflag.OPOST = false;
-    raw.lflag.ECHO = false;
-    raw.lflag.ECHONL = false;
-    raw.lflag.ICANON = false;
-    raw.lflag.IEXTEN = false;
-    raw.lflag.ISIG = false;
-    raw.cflag.PARENB = false;
-    raw.cflag.CSIZE = .CS8;
-    //raw.c_cc[c.VMIN] = 1;
-    //raw.c_cc[c.VTIME] = 0;
-    try std.posix.tcsetattr(std.posix.STDIN_FILENO, .FLUSH, raw);
-    //std.process.cleanExit(disableRawMode);
-    return original;
-}
-
-fn restoreTerminal(state: std.posix.termios) !void {
-    try std.posix.tcsetattr(std.posix.STDIN_FILENO, .FLUSH, state);
-}
-
 fn note(s: []const u8) void {
     std.debug.print("{s}\n", .{s});
-}
-
-fn moveTo(stdout: anytype, row: usize, col: usize) !void {
-    return stdout.print("\x1b[{d};{d}H", .{ row, col });
 }
 
 pub fn main() !void {
@@ -73,47 +39,42 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(main_alloc);
     defer args.deinit();
     _ = args.next().?;
-    const word_list_filename = args.next() orelse "no filename";
+    const typed_filename = args.next() orelse "out.txt";
 
-    const stdin_file = std.io.getStdIn().reader();
-    var br = std.io.bufferedReader(stdin_file);
-    const stdin = br.reader();
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
-
-    var arena = std.heap.ArenaAllocator.init(main_alloc);
-    defer arena.deinit();
-    const wl_alloc = arena.allocator();
-    std.debug.print("loading from '{s}'\n", .{word_list_filename});
-    const word_list_file = try std.fs.cwd().openFile(word_list_filename, .{});
-    defer word_list_file.close();
-    const wlr = word_list_file.reader();
     var word_list = compile.WordList.init(main_alloc);
-    var wc: compile.Weight = 1;
-    while (try wlr.readUntilDelimiterOrEofAlloc(main_alloc, '\n', 128)) |line| {
-        const after_indent = std.mem.trim(u8, line, " \t");
-        var word: []const u8 = undefined;
-        var weight: compile.Weight = undefined;
-        if (std.mem.indexOf(u8, after_indent, " ")) |sep| {
-            word = after_indent[sep + 1 ..];
-            weight = @floatFromInt(try std.fmt.parseInt(usize, after_indent[0..sep], 10));
-        } else {
-            word = after_indent;
-            weight = 1 / wc;
-        }
-        const lowered = try std.ascii.allocLowerString(wl_alloc, word);
-        if (word_list.getPtr(lowered)) |ww| {
-            ww.weight += weight;
-            if (partlyUpper(word) and !partlyUpper(ww.word)) {
-                ww.word = word;
+    while (args.next()) |word_list_filename| {
+        std.debug.print("loading from '{s}'\n", .{word_list_filename});
+        const word_list_file = try std.fs.cwd().openFile(word_list_filename, .{});
+        defer word_list_file.close();
+        const wlr = word_list_file.reader();
+        var arena = std.heap.ArenaAllocator.init(main_alloc);
+        defer arena.deinit();
+        const wl_alloc = arena.allocator();
+        var wc: compile.Weight = 1;
+        while (try wlr.readUntilDelimiterOrEofAlloc(main_alloc, '\n', 128)) |line| {
+            const after_indent = std.mem.trim(u8, line, " \t");
+            var word: []const u8 = undefined;
+            var weight: compile.Weight = undefined;
+            if (std.mem.indexOf(u8, after_indent, " ")) |sep| {
+                word = after_indent[sep + 1 ..];
+                weight = @floatFromInt(try std.fmt.parseInt(usize, after_indent[0..sep], 10));
+            } else {
+                word = after_indent;
+                weight = 1 / wc;
             }
-        } else {
-            wc += 1;
-            try word_list.put(lowered, .{ .word = word, .weight = weight });
+            const lowered = try std.ascii.allocLowerString(wl_alloc, word);
+            if (word_list.getPtr(lowered)) |ww| {
+                ww.weight += weight;
+                if (partlyUpper(word) and !partlyUpper(ww.word)) {
+                    ww.word = word;
+                }
+            } else {
+                wc += 1;
+                try word_list.put(lowered, .{ .word = word, .weight = weight });
+            }
         }
+        std.debug.print("loaded {d} words\n", .{wc});
     }
-    std.debug.print("loaded {d} words\n", .{wc});
     compile.normalise(&word_list);
 
     var ime = input.ShrunkenInputMethod.init(main_alloc);
@@ -128,8 +89,15 @@ pub fn main() !void {
     defer log_file.close();
     const log_writer = log_file.writer();
 
-    const original_termios = try enableRawMode();
-    defer restoreTerminal(original_termios) catch |e| std.debug.print("error: {any}\n", .{e});
+    const stdin_file = std.io.getStdIn().reader();
+    var br = std.io.bufferedReader(stdin_file);
+    const stdin = br.reader();
+    const stdout_file = std.io.getStdOut().writer();
+    var bw = std.io.bufferedWriter(stdout_file);
+    const stdout = bw.writer();
+
+    const original_termios = try ansi.enableRawMode();
+    defer ansi.restoreTerminal(original_termios) catch |e| std.debug.print("error: {any}\n", .{e});
     try stdout.print("\x1b[6n", .{});
     try bw.flush();
     const cursor_pos = try stdin.readUntilDelimiterAlloc(main_alloc, 'R', 16);
@@ -149,7 +117,7 @@ pub fn main() !void {
                     typing_row += 1;
                     word_column = 1;
                     try stdout.writeByte('\n');
-                    try moveTo(stdout, typing_row, word_column);
+                    try ansi.moveTo(stdout, typing_row, word_column);
                     try bw.flush();
                 },
                 else => {},
@@ -159,7 +127,7 @@ pub fn main() !void {
                 try log_writer.print("{any} {any}\n", .{ insert_action, normal_action });
                 switch (try ime.handleAction(insert_action, normal_action, false)) {
                     .silent => {
-                        try moveTo(stdout, typing_row, word_column);
+                        try ansi.moveTo(stdout, typing_row, word_column);
                         try stdout.print(
                             "\x1b[0K\x1b[4m{s}\x1b[1m{s}\x1b[0m",
                             .{ ime.literal.items, try ime.getCompletion() },
@@ -169,7 +137,7 @@ pub fn main() !void {
                     .text => |s| {
                         defer main_alloc.free(s);
                         try input_acc.appendSlice(s);
-                        try moveTo(stdout, typing_row, word_column);
+                        try ansi.moveTo(stdout, typing_row, word_column);
                         try stdout.writeAll(s);
                         word_column += s.len;
                         try bw.flush();
@@ -177,7 +145,7 @@ pub fn main() !void {
                     .pass => if (ime.mode == .normal and normal_action == .backspace) {
                         if (input_acc.pop() != null) {
                             word_column -= 1;
-                            try moveTo(stdout, typing_row, word_column);
+                            try ansi.moveTo(stdout, typing_row, word_column);
                             try stdout.writeByte(' ');
                             try bw.flush();
                         }
@@ -189,10 +157,11 @@ pub fn main() !void {
 
     std.debug.print("saving typed text\n", .{});
     if (short_buf[0] == 4) {
-        const output_file = try std.fs.cwd().createFile("out.txt", .{});
+        const output_file = try std.fs.cwd().createFile(typed_filename, .{ .truncate = false });
+        defer output_file.close();
+        try output_file.seekFromEnd(0);
         const output_writer = output_file.writer();
         std.debug.assert(try output_writer.write(input_acc.items) == input_acc.items.len);
-        output_file.close();
     }
     std.debug.print("end of program\n", .{});
 }

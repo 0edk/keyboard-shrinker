@@ -8,6 +8,7 @@ do
         then
             printf '%s is long\n' "$source_file"
         fi
-        dfdt "$source_file" zig fmt "$source_file"
+        printf 'n\n' | dfdt "$source_file" zig fmt "$source_file"
+        printf '\n'
     fi
 done
