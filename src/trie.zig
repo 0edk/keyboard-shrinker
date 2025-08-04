@@ -58,6 +58,16 @@ pub fn Trie(comptime K: type, comptime V: type) type {
             }
         }
 
+        pub fn getOrNull(self: *const Self, key: []const K) ?*const Self {
+            if (key.len == 0) {
+                return self;
+            } else if (self.children[key[0]]) |child| {
+                return child.getOrNull(key[1..]);
+            } else {
+                return null;
+            }
+        }
+
         pub fn deepForEach(
             self: *Self,
             context: anytype,
@@ -174,7 +184,7 @@ test "trie on string" {
         branch.leaf = 1;
     }
     for (words) |word| {
-        try std.testing.expectEqual(1, (try trie.get(word)).leaf);
+        try std.testing.expectEqual(1, trie.getOrNull(word).?.leaf);
     }
     try trie.show(void, 0);
 }

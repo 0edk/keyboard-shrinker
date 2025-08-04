@@ -89,9 +89,11 @@ pub fn main() !void {
         if (false) {
             const input_letters = try letters.charsToLetters(main_alloc, line);
             defer input_letters.deinit();
-            if ((try dict_trie.get(input_letters.items)).leaf) |matches| {
-                for (matches.items) |ww| {
-                    try stdout.print("{s}\t{d}\n", .{ ww.word, ww.weight });
+            if (dict_trie.getOrNull(input_letters.items)) |node| {
+                if (node.leaf) |matches| {
+                    for (matches.items) |ww| {
+                        try stdout.print("{s}\t{d}\n", .{ ww.word, ww.weight });
+                    }
                 }
             } else {
                 try stdout.print("{s}\t0\n", .{line});

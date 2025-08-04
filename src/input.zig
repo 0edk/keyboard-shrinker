@@ -8,24 +8,33 @@ const Choices = std.ArrayList(compile.WeightedWord);
 const Casing = enum { all_caps, title, lower };
 const InputMode = enum { insert, normal };
 const Action = union(enum) {
-    letter: letters.Letter,
-    symbol: u8,
-    special: enum {
-        backspace,
-        finish_partial,
-        next,
-        previous,
-        deter,
-        to_insert,
-        to_normal,
-    },
+    char: u8,
+    backspace,
+    finish_partial,
+    next,
+    previous,
+    deter,
+    to_insert,
+    to_normal,
 };
-const InputResult = Allocator.Error!?[]u8;
+const InputResult = union(enum) { silent, text: []const u8, pass };
 
 fn applyCase(allocator: Allocator, word: []const u8, casing: Casing) Allocator.Error![]u8 {
     return switch (casing) {
         .all_caps => std.ascii.allocUpperString(allocator, word),
-        .title => allocator.dupe(u8, word),
+        .title => for (word) |c| {
+            if (std.ascii.isUpper(c)) {
+                break allocator.dupe(u8, word);
+            }
+        } else blk: {
+            if (word.len == 0) {
+                break :blk allocator.alloc(u8, 0);
+            } else {
+                var copy = try allocator.dupe(u8, word);
+                copy[0] = std.ascii.toUpper(copy[0]);
+                break :blk copy;
+            }
+        },
         .lower => std.ascii.allocLowerString(allocator, word),
     };
 }
@@ -37,14 +46,14 @@ pub const ShrunkenInputMethod = struct {
     mode: InputMode = .normal,
     casing: Casing = .title,
     literal: letters.String,
-    query: std.ArrayList(trie.IteratorLayer(letters.Letter, Choices)),
+    query: std.ArrayList(letters.Letter),
     choice: usize = 0,
 
     pub fn init(allocator: Allocator) Self {
         return Self{
             .dict = compile.CompiledTrie.init(allocator),
             .literal = letters.String.init(allocator),
-            .query = std.ArrayList(trie.IteratorLayer(letters.Letter, Choices)).init(allocator),
+            .query = std.ArrayList(letters.Letter).init(allocator),
         };
     }
 
@@ -54,57 +63,105 @@ pub const ShrunkenInputMethod = struct {
         self.query.deinit();
     }
 
-    pub fn finishWord(self: *Self, next: ?u8) InputResult {
-        const sn = if (self.query.getLastOrNull()) |top| top.node else if (self.choice > 0) blk: {
-            self.choice -= 1;
-            break :blk &self.dict;
-        } else null;
-        if (sn) |node| {
-            if (node.leaf) |choice_list| {
-                const raw_word = choice_list.items[@min(self.choice, choice_list.items.len - 1)];
-                try self.literal.appendSlice(try applyCase(
-                    self.dict.allocator,
-                    raw_word.word,
-                    self.casing,
-                ));
+    pub fn getCompletion(self: *const Self) Allocator.Error![]const u8 {
+        if (self.dict.getOrNull(self.query.items)) |node| {
+            if (node.leaf) |words| {
+                if (self.query.items.len == 0) {
+                    return if (self.choice == 0) "" else words.items[self.choice - 1].word;
+                } else {
+                    return words.items[self.choice].word;
+                }
+            } else {
+                return "";
             }
+            // TODO: extend/autocomplete when you can
+        } else {
+            return (try letters.lettersToChars(self.dict.allocator, self.query.items)).items;
         }
-        self.mode = .normal;
-        self.casing = .title;
-        self.query.clearRetainingCapacity();
-        self.choice = 0;
-        if (next) |c| try self.literal.append(c);
-        const word = self.literal.items;
-        self.literal.clearRetainingCapacity();
-        return word;
     }
 
-    pub fn handleAction(self: *Self, insert: Action, normal: Action) InputResult {
-        switch (self.mode) {
-            .insert => switch (insert) {
-                .letter => |l| try self.literal.append(letters.letterToChar(l) orelse return null),
-                .symbol => |c| return self.finishWord(c),
-                .special => |a| switch (a) {
-                    // TODO
-                    else => return null,
+    fn literalise(self: *Self) Allocator.Error!void {
+        const completion = try applyCase(
+            self.dict.allocator,
+            try self.getCompletion(),
+            self.casing,
+        );
+        try self.literal.appendSlice(completion);
+        self.dict.allocator.free(completion);
+        self.query.clearRetainingCapacity();
+    }
+
+    pub fn finishWord(self: *Self, next: ?u8) Allocator.Error![]u8 {
+        try self.literalise();
+        self.mode = .normal;
+        self.casing = .title;
+        self.choice = 0;
+        if (next) |c| try self.literal.append(c);
+        return self.literal.toOwnedSlice();
+    }
+
+    pub fn handleAction(
+        self: *Self,
+        insert: Action,
+        normal: Action,
+        modded: bool,
+    ) Allocator.Error!InputResult {
+        if (modded) {
+            return .pass;
+        } else if (self.mode == .insert) {
+            switch (insert) {
+                .char => |c| if (letters.charToLetter(c)) |_| {
+                    try self.literal.append(c);
+                } else {
+                    return if (self.finishWord(c)) |t| .{ .text = t } else |e| e;
                 },
-            },
-            .normal => switch (normal) {
-                .letter => |l| if (self.usable_keys.isSet(l)) {
-                    const last_child = if (self.query.getLastOrNull()) |top| top.node else &self.dict;
-                    if (last_child.children[l]) |next_child| {
-                        try self.query.append(.{ .start = l, .node = next_child });
+                .backspace => if (self.literal.pop()) |_| {} else {
+                    self.mode = .normal;
+                    return .pass;
+                },
+                // TODO
+                else => return .silent,
+            }
+        } else {
+            switch (normal) {
+                .char => |c| if (letters.charToLetter(c)) |l| {
+                    if (self.usable_keys.isSet(l)) {
+                        if (self.query.items.len == 0) {
+                            self.casing = if (std.ascii.isUpper(c)) .all_caps else .lower;
+                        } else if (self.casing == .all_caps and std.ascii.isLower(c) or
+                            self.casing == .lower and std.ascii.isUpper(c))
+                        {
+                            self.casing = .title;
+                        }
+                        try self.query.append(l);
                     }
-                    // TODO
+                } else {
+                    return if (self.finishWord(c)) |t| .{ .text = t } else |e| e;
                 },
-                .symbol => |c| return self.finishWord(c),
-                .special => |a| switch (a) {
-                    // TODO
-                    else => return null,
+                .backspace => if (self.query.pop()) |_| {
+                    self.choice = 0;
+                } else if (self.literal.pop()) |_| {
+                    self.mode = .insert;
+                } else {
+                    return .pass;
                 },
-            },
+                .finish_partial => {
+                    try self.literalise();
+                    self.casing = .title;
+                    self.choice = 0;
+                },
+                // TODO
+                .next => return .silent,
+                .previous => return .silent,
+                .deter => return .silent,
+                .to_insert => {
+                    try self.literalise();
+                    self.mode = .insert;
+                },
+                .to_normal => return .silent,
+            }
         }
-        return null;
+        return .silent;
     }
 };
 
@@ -114,7 +171,7 @@ test "input basics" {
     var ime = ShrunkenInputMethod.init(std.testing.allocator);
     defer ime.deinit();
     defer ime.dict.deepForEach(ime.dict.allocator, null, compile.freeWords);
-    ime.usable_keys = compile.charsToSubset("acdeinorst");
+    ime.usable_keys = compile.charsToSubset("acdeilnorstu");
     var i: usize = 0;
     while (try wlr.readUntilDelimiterOrEofAlloc(std.testing.allocator, '\n', 128)) |line| {
         i += 1;
@@ -126,22 +183,32 @@ test "input basics" {
     }
     compile.normalise(&ime.dict);
     ime.dict.deepForEach({}, null, compile.sortLeaf);
-    const test_actions = [_]Action{
-        .{ .letter = 4 },
-        .{ .letter = 19 },
-        .{ .symbol = ' ' },
+    const test_action_chars = "Et tis: Ro\tae\x0e\x0e\x1b\x08\x08\x08\x08age!\x08.";
+    const test_results = [_]struct { usize, InputResult }{
+        .{ 2, .{ .text = "Get " } },
+        .{ 6, .{ .text = "this:" } },
+        .{ 7, .{ .text = " " } },
+        .{ 23, .{ .text = "Fromage!" } },
+        .{ 25, .{ .text = "." } },
     };
-    const test_results = [_]?[]const u8{
-        null,
-        null,
-        "get ",
-    };
-    for (test_actions, test_results) |a, dr| {
-        const fr = try ime.handleAction(.{ .letter = 0 }, a);
-        if (fr) |frs| {
-            try std.testing.expectEqualStrings(dr.?, frs);
-        } else {
-            try std.testing.expectEqual(dr, null);
+    var result_ind: usize = 0;
+    for (test_action_chars, 0..) |ac, j| {
+        const a: Action = switch (ac) {
+            '\t' => .finish_partial,
+            '\x0e' => .next,
+            '\x1b' => .to_insert,
+            '\x08' => .backspace,
+            else => |c| .{ .char = c },
+        };
+        const fr = try if (ime.mode == .insert) ime.handleAction(a, .{ .char = ' ' }, false) else ime.handleAction(.{ .char = ' ' }, a, false);
+        switch (fr) {
+            .text => |frs| {
+                try std.testing.expectEqual(test_results[result_ind][0], j);
+                try std.testing.expectEqualStrings(test_results[result_ind][1].text, frs);
+                result_ind += 1;
+                std.testing.allocator.free(frs);
+            },
+            else => std.debug.print("result {any} at index {d}\n", .{ fr, j }),
         }
     }
 }
