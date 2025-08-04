@@ -3,10 +3,11 @@ const letters = @import("letters.zig");
 const trie = @import("trie.zig");
 const compile = @import("compile.zig");
 const score = @import("score.zig");
+const input = @import("input.zig");
+const dvorak = @import("dvorak.zig");
 const Allocator = std.mem.Allocator;
 const Word = []const letters.Letter;
 const alphabet = "abcdefghijklmnopqrstuvwxyz'_";
-const default_keys = "acdeinorst";
 
 fn showSubset(writer: anytype, set: compile.LettersSubset) !void {
     for (0..alphabet.len, alphabet) |i, c| {
@@ -24,6 +25,41 @@ fn partlyUpper(s: []const u8) bool {
         lowers += @intFromBool(std.ascii.isLower(c));
     }
     return uppers > 0 and lowers < 0;
+}
+
+// https://ziggit.dev/t/how-to-read-arrow-key/7405
+fn enableRawMode() !std.posix.termios {
+    const original = try std.posix.tcgetattr(std.posix.STDIN_FILENO);
+    var raw = original;
+    raw.iflag.IGNBRK = false;
+    raw.iflag.BRKINT = false;
+    raw.iflag.PARMRK = false;
+    raw.iflag.INLCR = false;
+    raw.iflag.IGNCR = false;
+    raw.iflag.ICRNL = false;
+    raw.iflag.ISTRIP = false;
+    raw.iflag.IXON = false;
+    raw.oflag.OPOST = false;
+    raw.lflag.ECHO = false;
+    raw.lflag.ECHONL = false;
+    raw.lflag.ICANON = false;
+    raw.lflag.IEXTEN = false;
+    raw.lflag.ISIG = false;
+    raw.cflag.PARENB = false;
+    raw.cflag.CSIZE = .CS8;
+    //raw.c_cc[c.VMIN] = 1;
+    //raw.c_cc[c.VTIME] = 0;
+    try std.posix.tcsetattr(std.posix.STDIN_FILENO, .FLUSH, raw);
+    //std.process.cleanExit(disableRawMode);
+    return original;
+}
+
+fn restoreTerminal(state: std.posix.termios) !void {
+    try std.posix.tcsetattr(std.posix.STDIN_FILENO, .FLUSH, state);
+}
+
+fn note(s: []const u8) void {
+    std.debug.print("{s}\n", .{s});
 }
 
 pub fn main() !void {
@@ -47,6 +83,7 @@ pub fn main() !void {
     const wl_alloc = arena.allocator();
     std.debug.print("loading from '{s}'\n", .{word_list_filename});
     const word_list_file = try std.fs.cwd().openFile(word_list_filename, .{});
+    defer word_list_file.close();
     const wlr = word_list_file.reader();
     var word_list = compile.WordList.init(main_alloc);
     var wc: compile.Weight = 1;
@@ -74,53 +111,77 @@ pub fn main() !void {
     }
     std.debug.print("loaded {d} words\n", .{wc});
 
-    var buf: [32]u8 = undefined;
-    var seed: u64 = undefined;
-    try std.posix.getrandom(std.mem.asBytes(&seed));
-    var rng = std.Random.DefaultPrng.init(seed);
-    var rand = rng.random();
+    var ime = input.ShrunkenInputMethod.init(main_alloc);
+    defer ime.deinit();
+    ime.usable_keys = dvorak.default_subset;
+    std.debug.print("using subset '{s}'\n", .{dvorak.default_letters});
+    try compile.loadWords(&ime.dict, ime.usable_keys, word_list);
+    var input_acc = letters.String.init(main_alloc);
+    defer input_acc.deinit();
 
-    const default_subset = compile.charsToSubset(default_keys);
-    std.debug.print("using subset '{s}'\n", .{default_keys});
-    var dict_trie = compile.CompiledTrie.init(main_alloc);
-    try compile.loadWords(&dict_trie, default_subset, word_list);
+    const log_file = try std.fs.cwd().createFile("out.log", .{});
+    defer log_file.close();
+    const log_writer = log_file.writer();
 
-    while (try stdin.readUntilDelimiterOrEof(&buf, '\n')) |line| {
-        if (false) {
-            const input_letters = try letters.charsToLetters(main_alloc, line);
-            defer input_letters.deinit();
-            if (dict_trie.getOrNull(input_letters.items)) |node| {
-                if (node.leaf) |matches| {
-                    for (matches.items) |ww| {
-                        try stdout.print("{s}\t{d}\n", .{ ww.word, ww.weight });
-                    }
+    const original_termios = try enableRawMode();
+    defer restoreTerminal(original_termios) catch |e| std.debug.print("error: {any}\n", .{e});
+    try stdout.print("\x1b[6n", .{});
+    try bw.flush();
+    const cursor_pos = try stdin.readUntilDelimiterAlloc(main_alloc, 'R', 16);
+    const bracket = std.mem.indexOfScalar(u8, cursor_pos, '[').?;
+    const semicolon = std.mem.indexOfScalar(u8, cursor_pos, ';').?;
+    var typing_row = try std.fmt.parseInt(usize, cursor_pos[bracket + 1 .. semicolon], 10);
+    _ = &typing_row;
+    var word_column: usize = 1;
+
+    var short_buf: [1]u8 = undefined;
+    while (try stdin.read(&short_buf) == 1 and short_buf[0] != 3 and short_buf[0] != 4) {
+        const next_char = short_buf[0];
+        if (dvorak.charToNormal(next_char)) |normal_action| {
+            if (dvorak.charToInsert(next_char)) |insert_action| {
+                try log_writer.print("{any} {any}\n", .{ insert_action, normal_action });
+                switch (try ime.handleAction(insert_action, normal_action, false)) {
+                    .silent => {
+                        try stdout.print(
+                            "\x1b[{d};{d}H\x1b[0K\x1b[4m{s}\x1b[1m{s}\x1b[0m",
+                            .{ typing_row, word_column, ime.literal.items, try ime.getCompletion() },
+                        );
+                        try bw.flush();
+                    },
+                    .text => |s| {
+                        defer main_alloc.free(s);
+                        try input_acc.appendSlice(s);
+                        var it = std.mem.splitScalar(u8, s, '\n');
+                        var first = true;
+                        while (it.next()) |line| {
+                            if (!first) {
+                                typing_row += 1;
+                            }
+                            try stdout.print("\x1b[{d};{d}H{s}", .{ typing_row, word_column, s });
+                            word_column = line.len + if (first) word_column else 1;
+                            first = false;
+                        }
+                        try bw.flush();
+                    },
+                    .pass => switch (next_char) {
+                        0x08, 0x7F => if (input_acc.pop()) |_| {
+                            word_column -= 1;
+                            try stdout.print("\x1b[{d};{d}H ", .{ typing_row, word_column });
+                            try bw.flush();
+                        },
+                        else => {},
+                    },
                 }
-            } else {
-                try stdout.print("{s}\t0\n", .{line});
-            }
-            try bw.flush();
-        } else {
-            var climb_subset = compile.LettersSubset.initEmpty();
-            if (line.len > 0) {
-                for (line) |c| {
-                    if (letters.charToLetter(c)) |l| {
-                        climb_subset.set(l);
-                    }
-                }
-            } else {
-                for (0..alphabet.len) |i| {
-                    climb_subset.setValue(i, rand.boolean());
-                }
-            }
-            try showSubset(stdout, climb_subset);
-            try stdout.print(" ->\n", .{});
-            try bw.flush();
-            while (climb_subset.count() < 14) {
-                climb_subset.set(try score.climbStep(word_list, climb_subset, false) orelse break);
-                try showSubset(stdout, climb_subset);
-                try stdout.print(" ({d})\n", .{try score.badnessSubset(word_list, climb_subset)});
-                try bw.flush();
             }
         }
     }
+
+    std.debug.print("saving typed text\n", .{});
+    if (short_buf[0] == 4) {
+        const output_file = try std.fs.cwd().createFile("out.txt", .{});
+        const output_writer = output_file.writer();
+        std.debug.assert(try output_writer.write(input_acc.items) == input_acc.items.len);
+        output_file.close();
+    }
+    std.debug.print("end of program\n", .{});
 }

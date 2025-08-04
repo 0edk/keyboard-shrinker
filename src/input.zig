@@ -7,7 +7,7 @@ const Allocator = std.mem.Allocator;
 const Choices = std.ArrayList(compile.WeightedWord);
 const Casing = enum { all_caps, title, lower };
 const InputMode = enum { insert, normal };
-const Action = union(enum) {
+pub const Action = union(enum) {
     char: u8,
     backspace,
     finish_partial,
@@ -67,17 +67,19 @@ pub const ShrunkenInputMethod = struct {
         if (self.dict.getOrNull(self.query.items)) |node| {
             if (node.leaf) |words| {
                 if (self.query.items.len == 0) {
-                    return if (self.choice == 0) "" else words.items[self.choice - 1].word;
-                } else {
+                    if (self.choice == 0) {
+                        return "";
+                    } else if (self.choice <= words.items.len) {
+                        return words.items[self.choice - 1].word;
+                    }
+                } else if (self.choice < words.items.len) {
                     return words.items[self.choice].word;
                 }
             } else {
-                return "";
+                // TODO: extend/autocomplete when you can
             }
-            // TODO: extend/autocomplete when you can
-        } else {
-            return (try letters.lettersToChars(self.dict.allocator, self.query.items)).items;
         }
+        return (try letters.lettersToChars(self.dict.allocator, self.query.items)).items;
     }
 
     fn literalise(self: *Self) Allocator.Error!void {
@@ -150,12 +152,17 @@ pub const ShrunkenInputMethod = struct {
                     self.casing = .title;
                     self.choice = 0;
                 },
+                .next => {
+                    self.choice += 1;
+                },
+                .previous => {
+                    self.choice -= 1;
+                },
                 // TODO
-                .next => return .silent,
-                .previous => return .silent,
                 .deter => return .silent,
                 .to_insert => {
                     try self.literalise();
+                    self.choice = 0;
                     self.mode = .insert;
                 },
                 .to_normal => return .silent,
