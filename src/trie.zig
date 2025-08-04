@@ -5,7 +5,7 @@ const Allocator = std.mem.Allocator;
 fn nonzero(comptime T: type, x: T) bool {
     return switch (@typeInfo(T)) {
         .int => x > 0,
-        .optional => if (x) |_| true else false,
+        .optional => x != null,
         .@"struct" => x.items.len > 0,
         else => unreachable,
     };

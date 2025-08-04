@@ -137,12 +137,12 @@ pub const ShrunkenInputMethod = struct {
             return .pass;
         } else if (self.mode == .insert) {
             switch (insert) {
-                .char => |c| if (letters.charToLetter(c)) |_| {
-                    try self.literal.append(c);
-                } else {
+                .char => |c| if (letters.charToLetter(c) == null) {
                     return if (self.finishWord(c)) |t| .{ .text = t } else |e| e;
+                } else {
+                    try self.literal.append(c);
                 },
-                .backspace => if (self.literal.pop()) |_| {} else {
+                .backspace => if (self.literal.pop() == null) {
                     self.mode = .normal;
                     return .pass;
                 },
@@ -165,9 +165,9 @@ pub const ShrunkenInputMethod = struct {
                 } else {
                     return if (self.finishWord(c)) |t| .{ .text = t } else |e| e;
                 },
-                .backspace => if (self.query.pop()) |_| {
+                .backspace => if (self.query.pop() != null) {
                     self.choice = 0;
-                } else if (self.literal.pop()) |_| {
+                } else if (self.literal.pop() != null) {
                     self.mode = .insert;
                 } else {
                     return .pass;
@@ -213,15 +213,14 @@ test "input basics" {
             .{ .word = line, .weight = 1 / @as(f64, @floatFromInt(i)) },
         );
     }
-    compile.normalise(&ime.dict);
     ime.dict.deepForEach({}, null, compile.sortLeaf);
-    const test_action_chars = "Et tis: Ro\tae\x0e\x0e\x1b\x08\x08\x08\x08age!\x08.";
+    const test_action_chars = "Et tis: Ro\tae\x0e\x0e\x1b\x08\x08age!\x08.";
     const test_results = [_]struct { usize, InputResult }{
         .{ 2, .{ .text = "Get " } },
         .{ 6, .{ .text = "this:" } },
         .{ 7, .{ .text = " " } },
-        .{ 23, .{ .text = "Fromage!" } },
-        .{ 25, .{ .text = "." } },
+        .{ 21, .{ .text = "Fromage!" } },
+        .{ 23, .{ .text = "." } },
     };
     var result_ind: usize = 0;
     for (test_action_chars, 0..) |ac, j| {

@@ -114,6 +114,7 @@ pub fn main() !void {
         }
     }
     std.debug.print("loaded {d} words\n", .{wc});
+    compile.normalise(&word_list);
 
     var ime = input.ShrunkenInputMethod.init(main_alloc);
     defer ime.deinit();
@@ -174,7 +175,7 @@ pub fn main() !void {
                         try bw.flush();
                     },
                     .pass => if (ime.mode == .normal and normal_action == .backspace) {
-                        if (input_acc.pop()) |_| {
+                        if (input_acc.pop() != null) {
                             word_column -= 1;
                             try moveTo(stdout, typing_row, word_column);
                             try stdout.writeByte(' ');

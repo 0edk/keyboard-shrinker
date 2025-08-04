@@ -50,7 +50,7 @@ pub fn contractAddWord(
     const contracted = try contractOutput(subset, node.allocator, ww.word);
     defer contracted.deinit();
     var child: *CompiledTrie = try node.get(contracted.items);
-    if (child.leaf) |_| {} else {
+    if (child.leaf == null) {
         child.leaf = std.ArrayList(WeightedWord).init(child.allocator);
     }
     try child.leaf.?.append(ww);
@@ -71,8 +71,6 @@ test "compile google100" {
             .{ .word = line, .weight = 1 / @as(f64, @floatFromInt(i)) },
         );
     }
-    normalise(&dict_trie);
-    try std.testing.expectEqual(1.0, sumLeaves(&dict_trie));
     var it = try dict_trie.iterator();
     var found: usize = 0;
     while (try it.next()) |entry| {
@@ -90,33 +88,16 @@ test "compile google100" {
     try std.testing.expectEqual(i, found);
 }
 
-fn sumLeaf(leaf: []const WeightedWord) Weight {
-    var total: Weight = 0;
-    for (leaf) |ww| {
-        total += ww.weight;
+pub fn normalise(words: *WordList) void {
+    var total_weight: Weight = 0;
+    var weights = words.valueIterator();
+    while (weights.next()) |ww| {
+        total_weight += ww.weight;
     }
-    return total;
-}
-
-fn sumLeaves(node: *const CompiledTrie) Weight {
-    var total = if (node.leaf) |l| sumLeaf(l.items) else 0;
-    for (node.children) |maybe_child| {
-        if (maybe_child) |child| {
-            total += sumLeaves(child);
-        }
+    var entries = words.iterator();
+    while (entries.next()) |entry| {
+        entry.value_ptr.weight /= total_weight;
     }
-    return total;
-}
-
-fn unscaleLeaf(divisor: Weight, leaf: std.ArrayList(WeightedWord)) void {
-    for (0..leaf.items.len) |i| {
-        leaf.items[i].weight /= divisor;
-    }
-}
-
-pub fn normalise(node: *CompiledTrie) void {
-    const total_weight = sumLeaves(node);
-    node.deepForEach(total_weight, null, unscaleLeaf);
 }
 
 fn lessThanWord(_: void, lhs: WeightedWord, rhs: WeightedWord) bool {
@@ -132,6 +113,5 @@ pub fn loadWords(node: *CompiledTrie, subset: LettersSubset, words: WordList) Al
     while (it.next()) |entry| {
         try contractAddWord(node, subset, entry.value_ptr.*);
     }
-    normalise(node);
     node.deepForEach({}, null, sortLeaf);
 }

@@ -40,7 +40,6 @@ test "score google100" {
             .{ .word = line, .weight = 1 / @as(f64, @floatFromInt(i)) },
         );
     }
-    compile.normalise(&dict_trie);
     std.debug.print("badness {d}\n", .{badnessLeaves(&dict_trie, 0)});
     dict_trie.deepForEach(dict_trie.allocator, null, compile.freeWords);
 }
@@ -57,7 +56,6 @@ pub fn badnessSubset(
     while (it.next()) |entry| {
         try compile.contractAddWord(&dict_trie, subset, entry.value_ptr.*);
     }
-    compile.normalise(&dict_trie);
     const badness = badnessLeaves(&dict_trie, 0);
     return badness;
 }
