@@ -4,7 +4,6 @@ const compile = @import("compile.zig");
 const trie = @import("trie.zig");
 const Allocator = std.mem.Allocator;
 
-const Choices = std.ArrayList(compile.WeightedWord);
 const Casing = enum { all_caps, title, lower, unchanged };
 const InputMode = enum { insert, normal };
 pub const Action = union(enum) {
@@ -59,6 +58,7 @@ pub const ShrunkenInputMethod = struct {
     query: std.ArrayList(letters.Letter),
     completions: std.ArrayList(Completion),
     choice: ?struct { usize, usize } = null,
+    slid: bool = false,
 
     pub fn init(allocator: Allocator) Self {
         return Self{
@@ -100,10 +100,7 @@ pub const ShrunkenInputMethod = struct {
                 }
             } else if (self.completions.items[inds[0]].node.leaf) |words| {
                 if (inds[1] >= words.items.len) {
-                    self.choice = if (inds[0] == 0 and self.query.items.len == 0)
-                        null
-                    else
-                        .{ inds[0] + 1, 0 };
+                    self.choice = .{ inds[0] + 1, 0 };
                     return true;
                 }
             } else {
@@ -156,6 +153,7 @@ pub const ShrunkenInputMethod = struct {
         try self.loadCompletions();
         self.choice = if (self.query.items.len == 0) null else .{ 0, 0 };
         while (try self.adjustChoice()) {}
+        self.slid = false;
     }
 
     fn literalise(self: *Self) Allocator.Error!void {
@@ -167,48 +165,45 @@ pub const ShrunkenInputMethod = struct {
             );
             try self.literal.appendSlice(completion);
             self.dict.allocator.free(completion);
-            // TODO: what do we increment here?
-            //leaf.items[i].weight *= 2;
-            //std.mem.sort(
-            //    compile.WeightedWord,
-            //    leaf.items[0..i + 1],
-            //    {},
-            //    compile.lessThanWord,
-            //);
             self.query.clearRetainingCapacity();
             try self.resetCompletions();
         }
     }
 
     pub fn finishWord(self: *Self, next: ?u8) Allocator.Error![]u8 {
-        const maybe_new = self.literal.items.len > 0 or
-            if (self.dict.getOrNull(self.query.items)) |node| node.leaf == null else true;
         try self.literalise();
         self.mode = .normal;
         self.casing = .unchanged;
-        if (maybe_new) {
-            const contracted = try compile.contractOutput(
-                self.usable_keys,
-                self.dict.allocator,
-                self.literal.items,
-            );
-            defer contracted.deinit();
-            var node = try self.dict.get(contracted.items);
-            if (node.leaf == null) {
-                node.leaf = std.ArrayList(compile.WeightedWord).init(self.dict.allocator);
-            }
-            var leaf = node.leaf.?;
-            for (leaf.items) |ww| {
-                if (std.mem.eql(u8, ww.word, self.literal.items)) {
-                    break;
+        const contracted = try compile.contractOutput(
+            self.usable_keys,
+            self.dict.allocator,
+            self.literal.items,
+        );
+        defer contracted.deinit();
+        var node = try self.dict.get(contracted.items);
+        if (node.leaf == null) {
+            node.leaf = std.ArrayList(compile.WeightedWord).init(self.dict.allocator);
+        }
+        const leaf = node.leaf.?;
+        for (leaf.items, 0..) |ww, i| {
+            if (std.mem.eql(u8, ww.word, self.literal.items)) {
+                if (i > 0) {
+                    node.leaf.?.items[i].weight *= 2;
+                    std.mem.sort(
+                        compile.WeightedWord,
+                        node.leaf.?.items[0 .. i + 1],
+                        {},
+                        compile.lessThanWord,
+                    );
                 }
-            } else {
-                const precedent = if (leaf.items.len > 0) leaf.items[0].weight else 1;
-                try leaf.insert(0, .{
-                    .word = try self.dict.allocator.dupe(u8, self.literal.items),
-                    .weight = precedent,
-                });
+                break;
             }
+        } else {
+            const precedent = if (leaf.items.len > 0) leaf.items[0].weight else 1;
+            try node.leaf.?.insert(0, .{
+                .word = try self.dict.allocator.dupe(u8, self.literal.items),
+                .weight = precedent,
+            });
         }
         if (next) |c| try self.literal.append(c);
         return self.literal.toOwnedSlice();
@@ -250,6 +245,11 @@ pub const ShrunkenInputMethod = struct {
                         } else if (self.casing == .all_caps and std.ascii.isLower(c)) {
                             self.casing = .title;
                         }
+                        if (self.slid) {
+                            if (self.choice) |inds| {
+                                try self.query.appendSlice(self.completions.items[inds[0]].suffix);
+                            }
+                        }
                         try self.query.append(l);
                         try self.resetCompletions();
                     }
@@ -268,17 +268,38 @@ pub const ShrunkenInputMethod = struct {
                     self.casing = .unchanged;
                 },
                 .next => {
-                    if (self.choice != null) {
-                        self.choice.?[1] += 1;
-                    } else if (self.query.items.len == 0) {
+                    if (self.choice == null) {
                         self.choice = .{ 0, 0 };
                     } else {
-                        self.choice = .{ 1, 0 };
+                        self.choice.?[1] += 1;
                     }
                     while (try self.adjustChoice()) {}
+                    self.slid = true;
                 },
                 .previous => {
-                    // TODO
+                    if (self.choice) |inds| {
+                        if (inds[1] == 0) {
+                            if (inds[0] == 0) {
+                                self.choice = null;
+                            } else {
+                                var new_ind = inds[0] - 1;
+                                while (new_ind >= 0) {
+                                    if (self.completions.items[new_ind].node.leaf) |words| {
+                                        if (words.items.len > 0) {
+                                            self.choice = .{ new_ind, words.items.len - 1 };
+                                            break;
+                                        }
+                                    }
+                                    new_ind -= 1;
+                                } else {
+                                    self.choice = null;
+                                }
+                            }
+                        } else {
+                            self.choice = .{ inds[0], inds[1] - 1 };
+                        }
+                    }
+                    self.slid = true;
                 },
                 // TODO
                 .deter => return .silent,
@@ -357,5 +378,12 @@ test "new words" {
     var ime = ShrunkenInputMethod.init(std.testing.allocator);
     defer ime.deinit();
     ime.usable_keys = compile.charsToSubset("acdeilnorstu");
-    // TODO
+    try testActions(
+        &ime,
+        "a\x0e\x1bv a.",
+        &[_]struct { usize, []const u8 }{
+            .{ 4, "av " },
+            .{ 6, "av." },
+        },
+    );
 }
