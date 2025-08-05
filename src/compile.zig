@@ -100,7 +100,7 @@ pub fn normalise(words: *WordList) void {
     }
 }
 
-fn lessThanWord(_: void, lhs: WeightedWord, rhs: WeightedWord) bool {
+pub fn lessThanWord(_: void, lhs: WeightedWord, rhs: WeightedWord) bool {
     return lhs.weight > rhs.weight;
 }
 

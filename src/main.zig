@@ -128,10 +128,10 @@ pub fn main() !void {
                 switch (try ime.handleAction(insert_action, normal_action, false)) {
                     .silent => {
                         try ansi.moveTo(stdout, typing_row, word_column);
-                        try stdout.print(
-                            "\x1b[0K\x1b[4m{s}\x1b[1m{s}\x1b[0m",
-                            .{ ime.literal.items, try ime.getCompletion() },
-                        );
+                        try stdout.print("\x1b[0K\x1b[4m{s}\x1b[1m{s}\x1b[0m", .{
+                            ime.literal.items,
+                            if (try ime.getCompletion()) |comp| comp.word else "?",
+                        });
                         try bw.flush();
                     },
                     .text => |s| {

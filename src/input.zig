@@ -18,6 +18,15 @@ pub const Action = union(enum) {
     to_normal,
 };
 const InputResult = union(enum) { silent, text: []const u8, pass };
+const Completion = struct { node: *compile.CompiledTrie, suffix: []const letters.Letter };
+
+fn compareCompletion(_: void, a: Completion, b: Completion) std.math.Order {
+    if (a.node.leaf) |al| {
+        return if (b.node.leaf) |bl| std.math.order(bl.items[0].weight, al.items[0].weight) else .lt;
+    } else {
+        return if (b.node.leaf != null) .gt else .eq;
+    }
+}
 
 fn applyCase(allocator: Allocator, word: []const u8, casing: Casing) Allocator.Error![]u8 {
     return switch (casing) {
@@ -47,13 +56,15 @@ pub const ShrunkenInputMethod = struct {
     casing: Casing = .title,
     literal: letters.String,
     query: std.ArrayList(letters.Letter),
-    choice: usize = 0,
+    completions: std.ArrayList(Completion),
+    choice: ?struct { usize, usize } = null,
 
     pub fn init(allocator: Allocator) Self {
         return Self{
             .dict = compile.CompiledTrie.init(allocator),
             .literal = letters.String.init(allocator),
             .query = std.ArrayList(letters.Letter).init(allocator),
+            .completions = std.ArrayList(Completion).init(allocator),
         };
     }
 
@@ -61,36 +72,111 @@ pub const ShrunkenInputMethod = struct {
         self.dict.deinit();
         self.literal.deinit();
         self.query.deinit();
+        for (self.completions.items) |comp| {
+            self.dict.allocator.free(comp.suffix);
+        }
+        self.completions.deinit();
     }
 
-    pub fn getCompletion(self: *const Self) Allocator.Error![]const u8 {
-        if (self.dict.getOrNull(self.query.items)) |node| {
-            if (node.leaf) |words| {
-                if (self.query.items.len == 0) {
-                    if (self.choice == 0) {
-                        return "";
-                    } else if (self.choice <= words.items.len) {
-                        return words.items[self.choice - 1].word;
-                    }
-                } else if (self.choice < words.items.len) {
-                    return words.items[self.choice].word;
+    pub fn getCompletion(self: *const Self) Allocator.Error!?compile.WeightedWord {
+        if (self.choice) |inds| {
+            return self.completions.items[inds[0]].node.leaf.?.items[inds[1]];
+        } else {
+            var chars = try letters.lettersToChars(self.dict.allocator, self.query.items);
+            return .{ .word = try chars.toOwnedSlice(), .weight = 0 };
+        }
+    }
+
+    fn adjustChoice(self: *Self) Allocator.Error!bool {
+        if (self.choice) |inds| {
+            if (inds[0] >= self.completions.items.len) {
+                try self.loadCompletions();
+                if (inds[0] >= self.completions.items.len) {
+                    self.choice = null;
+                    return false;
+                } else {
+                    return true;
+                }
+            } else if (self.completions.items[inds[0]].node.leaf) |words| {
+                if (inds[1] >= words.items.len) {
+                    self.choice = if (inds[0] == 0 and self.query.items.len == 0)
+                        null
+                    else
+                        .{ inds[0] + 1, 0 };
+                    return true;
                 }
             } else {
-                // TODO: extend/autocomplete when you can
+                self.choice = .{ inds[0] + 1, 0 };
+                return true;
             }
         }
-        return (try letters.lettersToChars(self.dict.allocator, self.query.items)).items;
+        return false;
+    }
+
+    fn loadCompletions(self: *Self) Allocator.Error!void {
+        if (self.completions.getLastOrNull()) |last| {
+            const depth = last.suffix.len;
+            var arena = std.heap.ArenaAllocator.init(self.dict.allocator);
+            defer arena.deinit();
+            const alloc = arena.allocator();
+            var candidates = std.PriorityQueue(
+                Completion,
+                void,
+                compareCompletion,
+            ).init(alloc, {});
+            defer candidates.deinit();
+            for (self.completions.items) |comp| {
+                if (comp.suffix.len == depth) {
+                    for (comp.node.children, 0..) |maybe_child, l| {
+                        if (maybe_child) |child| {
+                            var suffix = try self.dict.allocator.alloc(letters.Letter, depth + 1);
+                            @memcpy(suffix[0..depth], comp.suffix);
+                            suffix[depth] = @intCast(l);
+                            try candidates.add(.{ .node = child, .suffix = suffix });
+                        }
+                    }
+                }
+            }
+            while (candidates.removeOrNull()) |comp| {
+                try self.completions.append(comp);
+            }
+        }
+    }
+
+    fn resetCompletions(self: *Self) Allocator.Error!void {
+        for (self.completions.items) |comp| {
+            self.dict.allocator.free(comp.suffix);
+        }
+        self.completions.clearRetainingCapacity();
+        try self.completions.append(.{
+            .node = try self.dict.get(self.query.items),
+            .suffix = &[0]letters.Letter{},
+        });
+        try self.loadCompletions();
+        self.choice = if (self.query.items.len == 0) null else .{ 0, 0 };
+        while (try self.adjustChoice()) {}
     }
 
     fn literalise(self: *Self) Allocator.Error!void {
-        const completion = try applyCase(
-            self.dict.allocator,
-            try self.getCompletion(),
-            self.casing,
-        );
-        try self.literal.appendSlice(completion);
-        self.dict.allocator.free(completion);
-        self.query.clearRetainingCapacity();
+        if (self.choice != null) {
+            const completion = try applyCase(
+                self.dict.allocator,
+                if (try self.getCompletion()) |comp| comp.word else "?",
+                self.casing,
+            );
+            try self.literal.appendSlice(completion);
+            self.dict.allocator.free(completion);
+            // TODO: what do we increment here?
+            //leaf.items[i].weight *= 2;
+            //std.mem.sort(
+            //    compile.WeightedWord,
+            //    leaf.items[0..i + 1],
+            //    {},
+            //    compile.lessThanWord,
+            //);
+            self.query.clearRetainingCapacity();
+            try self.resetCompletions();
+        }
     }
 
     pub fn finishWord(self: *Self, next: ?u8) Allocator.Error![]u8 {
@@ -99,7 +185,6 @@ pub const ShrunkenInputMethod = struct {
         try self.literalise();
         self.mode = .normal;
         self.casing = .title;
-        self.choice = 0;
         if (maybe_new) {
             const contracted = try compile.contractOutput(
                 self.usable_keys,
@@ -111,13 +196,14 @@ pub const ShrunkenInputMethod = struct {
             if (node.leaf == null) {
                 node.leaf = std.ArrayList(compile.WeightedWord).init(self.dict.allocator);
             }
-            for (node.leaf.?.items) |ww| {
+            var leaf = node.leaf.?;
+            for (leaf.items) |ww| {
                 if (std.mem.eql(u8, ww.word, self.literal.items)) {
                     break;
                 }
             } else {
-                const precedent = if (node.leaf.?.items.len > 0) node.leaf.?.items[0].weight else 1;
-                try node.leaf.?.insert(0, .{
+                const precedent = if (leaf.items.len > 0) leaf.items[0].weight else 1;
+                try leaf.insert(0, .{
                     .word = try self.dict.allocator.dupe(u8, self.literal.items),
                     .weight = precedent,
                 });
@@ -146,6 +232,7 @@ pub const ShrunkenInputMethod = struct {
                     self.mode = .normal;
                     return .pass;
                 },
+                .to_normal => self.mode = .normal,
                 // TODO
                 else => return .silent,
             }
@@ -161,12 +248,13 @@ pub const ShrunkenInputMethod = struct {
                             self.casing = .title;
                         }
                         try self.query.append(l);
+                        try self.resetCompletions();
                     }
                 } else {
                     return if (self.finishWord(c)) |t| .{ .text = t } else |e| e;
                 },
                 .backspace => if (self.query.pop() != null) {
-                    self.choice = 0;
+                    try self.resetCompletions();
                 } else if (self.literal.pop() != null) {
                     self.mode = .insert;
                 } else {
@@ -175,19 +263,24 @@ pub const ShrunkenInputMethod = struct {
                 .finish_partial => {
                     try self.literalise();
                     self.casing = .title;
-                    self.choice = 0;
                 },
                 .next => {
-                    self.choice += 1;
+                    if (self.choice != null) {
+                        self.choice.?[1] += 1;
+                    } else if (self.query.items.len == 0) {
+                        self.choice = .{ 0, 0 };
+                    } else {
+                        self.choice = .{ 1, 0 };
+                    }
+                    while (try self.adjustChoice()) {}
                 },
                 .previous => {
-                    self.choice -|= 1;
+                    // TODO
                 },
                 // TODO
                 .deter => return .silent,
                 .to_insert => {
                     try self.literalise();
-                    self.choice = 0;
                     self.mode = .insert;
                 },
                 .to_normal => return .silent,
@@ -214,13 +307,13 @@ test "input basics" {
         );
     }
     ime.dict.deepForEach({}, null, compile.sortLeaf);
-    const test_action_chars = "Et tis: Ro\tae\x0e\x0e\x1b\x08\x08age!\x08.";
+    const test_action_chars = "Et tis: Ro\tae\x0e\x0e\x1b\x08\x08\x08\x08age!\x08.";
     const test_results = [_]struct { usize, InputResult }{
         .{ 2, .{ .text = "Get " } },
         .{ 6, .{ .text = "this:" } },
         .{ 7, .{ .text = " " } },
-        .{ 21, .{ .text = "Fromage!" } },
-        .{ 23, .{ .text = "." } },
+        .{ 23, .{ .text = "Fromage!" } },
+        .{ 25, .{ .text = "." } },
     };
     var result_ind: usize = 0;
     for (test_action_chars, 0..) |ac, j| {
