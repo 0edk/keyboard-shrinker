@@ -65,9 +65,6 @@ pub fn main() !void {
             const lowered = try std.ascii.allocLowerString(wl_alloc, word);
             if (word_list.getPtr(lowered)) |ww| {
                 ww.weight += weight;
-                if (partlyUpper(word) and !partlyUpper(ww.word)) {
-                    ww.word = word;
-                }
             } else {
                 wc += 1;
                 try word_list.put(lowered, .{ .word = word, .weight = weight });
@@ -120,11 +117,22 @@ pub fn main() !void {
                     try ansi.moveTo(stdout, typing_row, word_column);
                     try bw.flush();
                 },
+                '\t' => {
+                    try input_acc.appendNTimes(' ', 4);
+                    word_column += 4;
+                    try stdout.writeByteNTimes(' ', 4);
+                    try ansi.moveTo(stdout, typing_row, word_column);
+                    try bw.flush();
+                },
                 else => {},
             }
         } else if (dvorak.charToNormal(next_char)) |normal_action| {
             if (dvorak.charToInsert(next_char)) |insert_action| {
-                try log_writer.print("{any} {any}\n", .{ insert_action, normal_action });
+                try log_writer.print("{any} {any} '{s}'\n", .{
+                    insert_action,
+                    normal_action,
+                    ime.literal.items,
+                });
                 switch (try ime.handleAction(insert_action, normal_action, false)) {
                     .silent => {
                         try ansi.moveTo(stdout, typing_row, word_column);

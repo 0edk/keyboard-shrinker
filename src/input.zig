@@ -5,7 +5,7 @@ const trie = @import("trie.zig");
 const Allocator = std.mem.Allocator;
 
 const Choices = std.ArrayList(compile.WeightedWord);
-const Casing = enum { all_caps, title, lower };
+const Casing = enum { all_caps, title, lower, unchanged };
 const InputMode = enum { insert, normal };
 pub const Action = union(enum) {
     char: u8,
@@ -45,6 +45,7 @@ fn applyCase(allocator: Allocator, word: []const u8, casing: Casing) Allocator.E
             }
         },
         .lower => std.ascii.allocLowerString(allocator, word),
+        .unchanged => allocator.dupe(u8, word),
     };
 }
 
@@ -53,7 +54,7 @@ pub const ShrunkenInputMethod = struct {
     usable_keys: compile.LettersSubset = compile.LettersSubset.initEmpty(),
     dict: compile.CompiledTrie,
     mode: InputMode = .normal,
-    casing: Casing = .title,
+    casing: Casing = .unchanged,
     literal: letters.String,
     query: std.ArrayList(letters.Letter),
     completions: std.ArrayList(Completion),
@@ -158,7 +159,7 @@ pub const ShrunkenInputMethod = struct {
     }
 
     fn literalise(self: *Self) Allocator.Error!void {
-        if (self.choice != null) {
+        if (self.choice != null or self.query.items.len > 0) {
             const completion = try applyCase(
                 self.dict.allocator,
                 if (try self.getCompletion()) |comp| comp.word else "?",
@@ -184,7 +185,7 @@ pub const ShrunkenInputMethod = struct {
             if (self.dict.getOrNull(self.query.items)) |node| node.leaf == null else true;
         try self.literalise();
         self.mode = .normal;
-        self.casing = .title;
+        self.casing = .unchanged;
         if (maybe_new) {
             const contracted = try compile.contractOutput(
                 self.usable_keys,
@@ -241,10 +242,12 @@ pub const ShrunkenInputMethod = struct {
                 .char => |c| if (letters.charToLetter(c)) |l| {
                     if (self.usable_keys.isSet(l)) {
                         if (self.query.items.len == 0) {
-                            self.casing = if (std.ascii.isUpper(c)) .all_caps else .lower;
-                        } else if (self.casing == .all_caps and std.ascii.isLower(c) or
-                            self.casing == .lower and std.ascii.isUpper(c))
+                            self.casing = if (std.ascii.isUpper(c)) .title else .unchanged;
+                        } else if (self.query.items.len == 1 and self.casing == .title and
+                            std.ascii.isUpper(c))
                         {
+                            self.casing = .all_caps;
+                        } else if (self.casing == .all_caps and std.ascii.isLower(c)) {
                             self.casing = .title;
                         }
                         try self.query.append(l);
@@ -262,7 +265,7 @@ pub const ShrunkenInputMethod = struct {
                 },
                 .finish_partial => {
                     try self.literalise();
-                    self.casing = .title;
+                    self.casing = .unchanged;
                 },
                 .next => {
                     if (self.choice != null) {
@@ -290,6 +293,36 @@ pub const ShrunkenInputMethod = struct {
     }
 };
 
+fn testActions(
+    ime: *ShrunkenInputMethod,
+    action_chars: []const u8,
+    results: []const struct { usize, []const u8 },
+) !void {
+    var result_ind: usize = 0;
+    for (action_chars, 0..) |ac, i| {
+        const action: Action = switch (ac) {
+            '\t' => .finish_partial,
+            '\x0e' => .next,
+            '\x1b' => .to_insert,
+            '\x08' => .backspace,
+            else => |c| .{ .char = c },
+        };
+        const fr = try if (ime.mode == .insert)
+            ime.handleAction(action, .{ .char = ' ' }, false)
+        else
+            ime.handleAction(.{ .char = ' ' }, action, false);
+        switch (fr) {
+            .text => |frs| {
+                try std.testing.expectEqual(results[result_ind][0], i);
+                try std.testing.expectEqualStrings(results[result_ind][1], frs);
+                result_ind += 1;
+                std.testing.allocator.free(frs);
+            },
+            else => std.debug.print("result {any} at index {d}\n", .{ fr, i }),
+        }
+    }
+}
+
 test "input basics" {
     const word_list_file = try std.fs.cwd().openFile("dicts/google_100", .{});
     const wlr = word_list_file.reader();
@@ -307,32 +340,22 @@ test "input basics" {
         );
     }
     ime.dict.deepForEach({}, null, compile.sortLeaf);
-    const test_action_chars = "Et tis: Ro\tae\x0e\x0e\x1b\x08\x08\x08\x08age!\x08.";
-    const test_results = [_]struct { usize, InputResult }{
-        .{ 2, .{ .text = "Get " } },
-        .{ 6, .{ .text = "this:" } },
-        .{ 7, .{ .text = " " } },
-        .{ 23, .{ .text = "Fromage!" } },
-        .{ 25, .{ .text = "." } },
-    };
-    var result_ind: usize = 0;
-    for (test_action_chars, 0..) |ac, j| {
-        const a: Action = switch (ac) {
-            '\t' => .finish_partial,
-            '\x0e' => .next,
-            '\x1b' => .to_insert,
-            '\x08' => .backspace,
-            else => |c| .{ .char = c },
-        };
-        const fr = try if (ime.mode == .insert) ime.handleAction(a, .{ .char = ' ' }, false) else ime.handleAction(.{ .char = ' ' }, a, false);
-        switch (fr) {
-            .text => |frs| {
-                try std.testing.expectEqual(test_results[result_ind][0], j);
-                try std.testing.expectEqualStrings(test_results[result_ind][1].text, frs);
-                result_ind += 1;
-                std.testing.allocator.free(frs);
-            },
-            else => std.debug.print("result {any} at index {d}\n", .{ fr, j }),
-        }
-    }
+    try testActions(
+        &ime,
+        "Et tis: Ro\tae\x0e\x0e\x1b\x08\x08age!\x08.",
+        &[_]struct { usize, []const u8 }{
+            .{ 2, "Get " },
+            .{ 6, "this:" },
+            .{ 7, " " },
+            .{ 21, "Fromage!" },
+            .{ 23, "." },
+        },
+    );
+}
+
+test "new words" {
+    var ime = ShrunkenInputMethod.init(std.testing.allocator);
+    defer ime.deinit();
+    ime.usable_keys = compile.charsToSubset("acdeilnorstu");
+    // TODO
 }
