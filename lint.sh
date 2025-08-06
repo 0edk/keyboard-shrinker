@@ -10,5 +10,6 @@ do
         fi
         printf 'n\n' | dfdt "$source_file" zig fmt "$source_file"
         printf '\n'
+        grep -Hn '^.\{100\}' "$source_file"
     fi
 done

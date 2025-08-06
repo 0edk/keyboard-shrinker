@@ -2,6 +2,7 @@ const std = @import("std");
 const letters = @import("letters.zig");
 const compile = @import("compile.zig");
 const trie = @import("trie.zig");
+const fillings = @import("fillings.zig");
 const Allocator = std.mem.Allocator;
 
 const Casing = enum { all_caps, title, lower, unchanged };
@@ -17,15 +18,6 @@ pub const Action = union(enum) {
     to_normal,
 };
 const InputResult = union(enum) { silent, text: []const u8, pass };
-const Completion = struct { node: *compile.CompiledTrie, suffix: []const letters.Letter };
-
-fn compareCompletion(_: void, a: Completion, b: Completion) std.math.Order {
-    if (a.node.leaf) |al| {
-        return if (b.node.leaf) |bl| std.math.order(bl.items[0].weight, al.items[0].weight) else .lt;
-    } else {
-        return if (b.node.leaf != null) .gt else .eq;
-    }
-}
 
 fn applyCase(allocator: Allocator, word: []const u8, casing: Casing) Allocator.Error![]u8 {
     return switch (casing) {
@@ -56,16 +48,14 @@ pub const ShrunkenInputMethod = struct {
     casing: Casing = .unchanged,
     literal: letters.String,
     query: std.ArrayList(letters.Letter),
-    completions: std.ArrayList(Completion),
-    choice: ?struct { usize, usize } = null,
-    slid: bool = false,
+    completions: fillings.Completer,
 
     pub fn init(allocator: Allocator) Self {
         return Self{
             .dict = compile.CompiledTrie.init(allocator),
             .literal = letters.String.init(allocator),
             .query = std.ArrayList(letters.Letter).init(allocator),
-            .completions = std.ArrayList(Completion).init(allocator),
+            .completions = fillings.Completer.init(allocator),
         };
     }
 
@@ -73,96 +63,28 @@ pub const ShrunkenInputMethod = struct {
         self.dict.deinit();
         self.literal.deinit();
         self.query.deinit();
-        for (self.completions.items) |comp| {
-            self.dict.allocator.free(comp.suffix);
-        }
         self.completions.deinit();
     }
 
-    pub fn getCompletion(self: *const Self) Allocator.Error!?compile.WeightedWord {
-        if (self.choice) |inds| {
-            return self.completions.items[inds[0]].node.leaf.?.items[inds[1]];
-        } else {
-            var chars = try letters.lettersToChars(self.dict.allocator, self.query.items);
-            return .{ .word = try chars.toOwnedSlice(), .weight = 0 };
-        }
-    }
-
-    fn adjustChoice(self: *Self) Allocator.Error!bool {
-        if (self.choice) |inds| {
-            if (inds[0] >= self.completions.items.len) {
-                try self.loadCompletions();
-                if (inds[0] >= self.completions.items.len) {
-                    self.choice = null;
-                    return false;
-                } else {
-                    return true;
-                }
-            } else if (self.completions.items[inds[0]].node.leaf) |words| {
-                if (inds[1] >= words.items.len) {
-                    self.choice = .{ inds[0] + 1, 0 };
-                    return true;
-                }
-            } else {
-                self.choice = .{ inds[0] + 1, 0 };
-                return true;
-            }
-        }
-        return false;
-    }
-
-    fn loadCompletions(self: *Self) Allocator.Error!void {
-        if (self.completions.getLastOrNull()) |last| {
-            const depth = last.suffix.len;
-            var arena = std.heap.ArenaAllocator.init(self.dict.allocator);
-            defer arena.deinit();
-            const alloc = arena.allocator();
-            var candidates = std.PriorityQueue(
-                Completion,
-                void,
-                compareCompletion,
-            ).init(alloc, {});
-            defer candidates.deinit();
-            for (self.completions.items) |comp| {
-                if (comp.suffix.len == depth) {
-                    for (comp.node.children, 0..) |maybe_child, l| {
-                        if (maybe_child) |child| {
-                            var suffix = try self.dict.allocator.alloc(letters.Letter, depth + 1);
-                            @memcpy(suffix[0..depth], comp.suffix);
-                            suffix[depth] = @intCast(l);
-                            try candidates.add(.{ .node = child, .suffix = suffix });
-                        }
-                    }
-                }
-            }
-            while (candidates.removeOrNull()) |comp| {
-                try self.completions.append(comp);
-            }
-        }
-    }
-
     fn resetCompletions(self: *Self) Allocator.Error!void {
-        for (self.completions.items) |comp| {
-            self.dict.allocator.free(comp.suffix);
-        }
-        self.completions.clearRetainingCapacity();
-        try self.completions.append(.{
-            .node = try self.dict.get(self.query.items),
-            .suffix = &[0]letters.Letter{},
-        });
-        try self.loadCompletions();
-        self.choice = if (self.query.items.len == 0) null else .{ 0, 0 };
-        while (try self.adjustChoice()) {}
-        self.slid = false;
+        self.completions.deinit();
+        self.completions = fillings.Completer.init(self.dict.allocator);
+        try self.completions.start(self.query.items, try self.dict.get(self.query.items));
+    }
+
+    pub fn getCompletion(self: *const Self) Allocator.Error![]u8 {
+        const raw = if (try self.completions.getCompletion()) |comp|
+            comp
+        else if (self.query.items.len > 0) blk: {
+            var char_list = try letters.lettersToChars(self.dict.allocator, self.query.items);
+            break :blk try char_list.toOwnedSlice();
+        } else "";
+        return applyCase(self.dict.allocator, raw, self.casing);
     }
 
     fn literalise(self: *Self) Allocator.Error!void {
-        if (self.choice != null or self.query.items.len > 0) {
-            const completion = try applyCase(
-                self.dict.allocator,
-                if (try self.getCompletion()) |comp| comp.word else "?",
-                self.casing,
-            );
+        const completion = try self.getCompletion();
+        if (completion.len > 0) {
             try self.literal.appendSlice(completion);
             self.dict.allocator.free(completion);
             self.query.clearRetainingCapacity();
@@ -245,11 +167,7 @@ pub const ShrunkenInputMethod = struct {
                         } else if (self.casing == .all_caps and std.ascii.isLower(c)) {
                             self.casing = .title;
                         }
-                        if (self.slid) {
-                            if (self.choice) |inds| {
-                                try self.query.appendSlice(self.completions.items[inds[0]].suffix);
-                            }
-                        }
+                        if (self.completions.inferred()) |s| try self.query.appendSlice(s);
                         try self.query.append(l);
                         try self.resetCompletions();
                     }
@@ -267,40 +185,8 @@ pub const ShrunkenInputMethod = struct {
                     try self.literalise();
                     self.casing = .unchanged;
                 },
-                .next => {
-                    if (self.choice == null) {
-                        self.choice = .{ 0, 0 };
-                    } else {
-                        self.choice.?[1] += 1;
-                    }
-                    while (try self.adjustChoice()) {}
-                    self.slid = true;
-                },
-                .previous => {
-                    if (self.choice) |inds| {
-                        if (inds[1] == 0) {
-                            if (inds[0] == 0) {
-                                self.choice = null;
-                            } else {
-                                var new_ind = inds[0] - 1;
-                                while (new_ind >= 0) {
-                                    if (self.completions.items[new_ind].node.leaf) |words| {
-                                        if (words.items.len > 0) {
-                                            self.choice = .{ new_ind, words.items.len - 1 };
-                                            break;
-                                        }
-                                    }
-                                    new_ind -= 1;
-                                } else {
-                                    self.choice = null;
-                                }
-                            }
-                        } else {
-                            self.choice = .{ inds[0], inds[1] - 1 };
-                        }
-                    }
-                    self.slid = true;
-                },
+                .next => try self.completions.advance(),
+                .previous => try self.completions.retreat(),
                 // TODO
                 .deter => return .silent,
                 .to_insert => {

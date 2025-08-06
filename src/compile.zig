@@ -108,7 +108,11 @@ pub fn sortLeaf(_: void, leaf: std.ArrayList(WeightedWord)) void {
     std.mem.sort(WeightedWord, leaf.items, {}, lessThanWord);
 }
 
-pub fn loadWords(node: *CompiledTrie, subset: LettersSubset, words: WordList) Allocator.Error!void {
+pub fn loadWords(
+    node: *CompiledTrie,
+    subset: LettersSubset,
+    words: WordList,
+) Allocator.Error!void {
     var it = words.iterator();
     while (it.next()) |entry| {
         try contractAddWord(node, subset, entry.value_ptr.*);
