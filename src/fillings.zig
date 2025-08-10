@@ -7,7 +7,10 @@ const Completion = struct { node: *compile.CompiledTrie, suffix: []const letters
 
 fn compareCompletion(_: void, a: Completion, b: Completion) std.math.Order {
     if (a.node.leaf) |al| {
-        return if (b.node.leaf) |bl| std.math.order(bl.items[0].weight, al.items[0].weight) else .lt;
+        return if (b.node.leaf) |bl|
+            std.math.order(bl.items[0].weight, al.items[0].weight)
+        else
+            .lt;
     } else {
         return if (b.node.leaf != null) .gt else .eq;
     }
@@ -136,7 +139,7 @@ pub const Completer = struct {
                     self.choice = null;
                 } else {
                     var new_ind = inds[0] - 1;
-                    while (new_ind >= 0) {
+                    while (new_ind > 0) {
                         if (self.completions.items[new_ind].node.leaf) |words| {
                             if (words.items.len > 0) {
                                 self.choice = .{ new_ind, words.items.len - 1 };
