@@ -40,7 +40,6 @@ pub fn handleKeysym(ime: *input.ShrunkenInputMethod, key: u8, writer: anytype) !
                 .text => |s| {
                     defer ime.dict.allocator.free(s);
                     try writer.writeAll("text:");
-                    // TODO
                     var start: usize = 0;
                     while (std.mem.indexOfAnyPos(u8, s, start, "\n:\\")) |esc_ind| {
                         try writer.writeAll(s[start..esc_ind]);
@@ -51,10 +50,13 @@ pub fn handleKeysym(ime: *input.ShrunkenInputMethod, key: u8, writer: anytype) !
                     try writer.writeAll(s[start..]);
                     try writer.writeByte('\n');
                 },
-                .pass => try writer.print(
-                    "text:{s}{c}\n",
-                    .{ if (shouldEscape(key)) "\\" else "", key },
-                ),
+                .pass => if (ime.mode == .normal and normal_action == .backspace)
+                    try writer.writeAll("text:\x08\n")
+                else
+                    try writer.print(
+                        "text:{s}{c}\n",
+                        .{ if (shouldEscape(key)) "\\" else "", key },
+                    ),
             }
         }
     } else {

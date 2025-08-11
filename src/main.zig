@@ -33,9 +33,20 @@ pub fn main() !void {
         if (std.mem.indexOfScalar(u8, command, ':')) |colon| {
             switch (command[0]) {
                 'r' => {
-                    const raw_file = try std.fs.cwd().openFile(command[colon + 1 ..], .{});
-                    defer raw_file.close();
-                    try protocol.populateFromRaw(&word_list, raw_file.reader());
+                    const filename = command[colon + 1 ..];
+                    if (std.fs.cwd().openFile(filename, .{})) |raw_file| {
+                        defer raw_file.close();
+                        try protocol.populateFromRaw(&word_list, raw_file.reader());
+                    } else |err| switch (err) {
+                        error.FileNotFound => try stdout.print(
+                            "error:file '{s}' not found\n",
+                            .{filename},
+                        ),
+                        else => try stdout.print(
+                            "error:{!} in opening '{s}'\n",
+                            .{ err, filename },
+                        ),
+                    }
                 },
                 'c' => try stdout.print("error:'count' not implemented\n", .{}),
                 else => try stdout.print("error:unknown command '{s}'\n", .{command[0..colon]}),
