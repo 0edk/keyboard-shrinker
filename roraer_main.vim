@@ -4,10 +4,15 @@ var ime_job: job = null_job
 var ime_channel: channel = null_channel
 var ime_enabled = false
 var saved_mappings: dict<dict<any>> = {}
+var last_word = ''
+var should_stopi = false
+var pending_keys = []
 
 # TODO: include the last few (| breaks things due to Vim syntax)
 const PRINTABLE_CHARS = map(range(33, 123), (_, n) => nr2char(n))
-const SPECIAL_KEYS = {'<Space>': ' ', '<Tab>': '\t', '<CR>': '\n', '<BS>': '\b', '<Del>': '\x7f'}
+const SPECIAL_KEYS = {
+    '<Space>': ' ', '<Tab>': '\t', '<CR>': '\n', '<BS>': '\b', '<Del>': '\x7f', '<Esc>': '\e'
+}
 
 def IMEOutput(channel: channel, msg: string)
     if !ime_enabled
@@ -22,22 +27,28 @@ def IMEOutput(channel: channel, msg: string)
             IMEUpdateWordDisplay(word_text)
         elseif line =~ '^text:'
             var chars = substitute(line, '^text:', '', '')
-            chars = UnescapeString(chars)
             IMEProcessOutput(chars)
+            last_word = ''
         elseif line =~ '^error:'
             var error = UnescapeString(substitute(line, '^error:', '', ''))
             echom "IME error:" error
+            last_word = ''
         endif
     endfor
 enddef
 
 def IMEUpdateWordDisplay(word: string)
+    if !empty(word)
+        last_word = word
+    endif
     if exists('*nvim_buf_set_extmark')
         # TODO: something cooler for Neovim
     elseif exists('*prop_clear') && exists('*prop_add')
         prop_clear(line('.'), line('.'), {'type': 'ime_word_state'})
         if !empty(word)
-            prop_add(line('.'), col('.'), {'text': '[' .. word .. ']', 'type': 'ime_word_state'})
+            # TODO: actually parse the ANSI escape sequences
+            var cleaned = substitute(word, '\e\[[0-9;]*m', '', 'g')
+            prop_add(line('.'), col('.'), {'text': ' ' .. cleaned, 'type': 'ime_word_state'})
         endif
     else
         if empty(word)
@@ -53,23 +64,30 @@ def IMEProcessOutput(chars: string)
         return
     endif
     IMEUpdateWordDisplay('')
-    var i = 0
-    while i < len(chars)
-        var char = chars[i]
-        if char == '\'
-            if i + 1 < len(chars)
-                var next_char = chars[i + 1]
-                feedkeys(next_char, 'n')
-                i += 2
+    if should_stopi
+        feedkeys(chars[: -2] .. "\e", 'n')
+        for key in pending_keys
+            feedkeys(key, 'n')
+        endfor
+        pending_keys = []
+        should_stopi = false
+    else
+        var i = 0
+        while i < len(chars)
+            var char = chars[i]
+            if char == '\'
+                if i + 1 < len(chars)
+                    feedkeys(chars[i + 1], 'n')
+                    i += 1
+                else
+                    feedkeys("\n", 'n')
+                endif
             else
-                feedkeys("\n", 'n')
-                i += 1
+               feedkeys(char, 'n')
             endif
-        else
-            feedkeys(char, 'n')
             i += 1
-        endif
-    endwhile
+        endwhile
+    endif
 enddef
 
 def EscapeString(str: string): string
@@ -81,13 +99,23 @@ def UnescapeString(str: string): string
 enddef
 
 def g:IMEHandleKey(key: string)
+    if should_stopi
+        add(pending_keys, key)
+        return
+    endif
     if !ime_enabled || ime_channel == null_channel
         feedkeys(key, 'n')
         return
     endif
     
     try
-        ch_sendraw(ime_channel, key)
+        if (key ==# "\e") && !empty(last_word)
+            should_stopi = true
+            ch_sendraw(ime_channel, " ")
+        else
+            echom "Sending to IME" key "end"
+            ch_sendraw(ime_channel, key)
+        endif
     catch
         echom "IME communication error:" v:exception
         IMEDisable()
@@ -123,16 +151,10 @@ def IMERestoreMappings()
 enddef
 
 def IMESetupMappings()
-    for char in PRINTABLE_CHARS
+    for char in PRINTABLE_CHARS + keys(SPECIAL_KEYS)
         execute printf(
             'inoremap <silent> %s <Cmd>call g:IMEHandleKey("%s")<CR>',
-            char, escape(char, '"')
-        )
-    endfor
-    for [key, target] in items(SPECIAL_KEYS)
-        execute printf(
-            'inoremap <silent> %s <Cmd>call g:IMEHandleKey(%s)<CR>',
-            key, target
+            char, get(SPECIAL_KEYS, char, escape(char, '\"'))
         )
     endfor
 enddef
@@ -153,10 +175,6 @@ export def IMEEnable(dataset_file: string = '')
     endif
     
     var dataset = empty(dataset_file) ? expand('%:p') : dataset_file
-    if empty(dataset)
-        echoerr "No dataset file specified and current buffer has no filename"
-        return
-    endif
     
     IMESaveCurrentMappings()
     
@@ -172,13 +190,15 @@ export def IMEEnable(dataset_file: string = '')
         endif
         ime_channel = job_getchannel(ime_job)
         
-        var init_cmd = 'raw:' .. EscapeString(dataset) .. "\n\n"
-        ch_sendraw(ime_channel, init_cmd)
+        if !empty(dataset)
+            ch_sendraw(ime_channel, 'raw:' .. EscapeString(dataset) .. "\n")
+        endif
+        ch_sendraw(ime_channel, "\n")
         
         IMESetupMappings()
         if exists('*prop_type_add')
             call prop_type_delete('ime_word_state')
-            call prop_type_add('ime_word_state', {'highlight': 'Comment'})
+            call prop_type_add('ime_word_state', {'highlight': 'Underlined'})
         endif
         
         ime_enabled = true

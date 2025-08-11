@@ -33,10 +33,12 @@ pub fn handleKeysym(ime: *input.ShrunkenInputMethod, key: u8, writer: anytype) !
     if (dvorak.charToNormal(key)) |normal_action| {
         if (dvorak.charToInsert(key)) |insert_action| {
             switch (try ime.handleAction(insert_action, normal_action, false)) {
-                .silent => try writer.print(
-                    "word:{s}\x1b[1m{s}\x1b[0m\n",
-                    .{ ime.literal.items, try ime.getCompletion() },
-                ),
+                .silent => {
+                    const comp = try ime.getCompletion();
+                    try writer.print("word:{s}", .{ime.literal.items});
+                    if (comp.len > 0) try writer.print("\x1b[1m{s}\x1b[0m", .{comp});
+                    try writer.writeByte('\n');
+                },
                 .text => |s| {
                     defer ime.dict.allocator.free(s);
                     try writer.writeAll("text:");
