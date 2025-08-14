@@ -1,0 +1,10 @@
+This is how we map the four main rows of ten keys each.
+Keys are separated by spaces.
+Single letters indicate letter actions.
+Capitalised words are IME actions.
+Pairs of characters are, respectively, default and shifted.
+
+!1 @2 #3 $4 %5 ^6 &7 *8 (9 )0
+-" ,< .> Partial `~ Unused =+ C R L
+A O E U I D Next T N S
+;: [{ Ins Prev Unused \| Bksp Deter ]} /?

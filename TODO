@@ -1,0 +1,7 @@
+restyle displayed word preview
+position cursor right
+load from all tracked files, not just current
+load from language-specific template
+rearrange keys by usage
+implement deter action
+arrow keys in completions

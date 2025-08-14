@@ -1,4 +1,5 @@
-zig-out/*
+main
+main.o
 .zig-cache/*
 tags
 dicts/*
