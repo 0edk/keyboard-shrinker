@@ -73,12 +73,13 @@ pub const ShrunkenInputMethod = struct {
     }
 
     pub fn getCompletion(self: *const Self) Allocator.Error![]u8 {
-        const raw = if (try self.completions.getCompletion()) |comp|
-            comp
+        const raw, const should_free = if (try self.completions.getCompletion()) |comp|
+            .{ comp, false }
         else if (self.query.items.len > 0) blk: {
-            var char_list = try letters.lettersToChars(self.dict.allocator, self.query.items);
-            break :blk try char_list.toOwnedSlice();
-        } else "";
+            const char_list = try letters.lettersToChars(self.dict.allocator, self.query.items);
+            break :blk .{ char_list.items, true };
+        } else .{ "", false };
+        defer if (should_free) self.dict.allocator.free(raw);
         return applyCase(self.dict.allocator, raw, self.casing);
     }
 
@@ -92,7 +93,7 @@ pub const ShrunkenInputMethod = struct {
         }
     }
 
-    pub fn finishWord(self: *Self, next: ?u8) Allocator.Error![]u8 {
+    pub fn finishWord(self: *Self) Allocator.Error!void {
         try self.literalise();
         self.mode = .normal;
         self.casing = .unchanged;
@@ -127,8 +128,7 @@ pub const ShrunkenInputMethod = struct {
                 .weight = precedent,
             });
         }
-        if (next) |c| try self.literal.append(c);
-        return self.literal.toOwnedSlice();
+        self.literal.clearRetainingCapacity();
     }
 
     pub fn handleAction(
@@ -142,7 +142,8 @@ pub const ShrunkenInputMethod = struct {
         } else if (self.mode == .insert) {
             switch (insert) {
                 .char => |c| if (letters.charToLetter(c) == null) {
-                    return if (self.finishWord(c)) |t| .{ .text = t } else |e| e;
+                    try self.finishWord();
+                    return .{ .text = try self.dict.allocator.dupe(u8, &[_]u8{c}) };
                 } else {
                     try self.literal.append(c);
                 },
@@ -172,7 +173,8 @@ pub const ShrunkenInputMethod = struct {
                         try self.resetCompletions();
                     }
                 } else {
-                    return if (self.finishWord(c)) |t| .{ .text = t } else |e| e;
+                    try self.finishWord();
+                    return .{ .text = try self.dict.allocator.dupe(u8, &[_]u8{c}) };
                 },
                 .backspace => if (self.query.pop() != null) {
                     try self.resetCompletions();
@@ -185,7 +187,9 @@ pub const ShrunkenInputMethod = struct {
                     try self.literalise();
                     self.casing = .unchanged;
                 },
-                .next => try self.completions.advance(),
+                .next => {
+                    try self.completions.advance();
+                },
                 .previous => try self.completions.retreat(),
                 // TODO
                 .deter => return .silent,
@@ -219,13 +223,26 @@ fn testActions(
         else
             ime.handleAction(.{ .char = ' ' }, action, false);
         switch (fr) {
+            .silent => {
+                const comp = try ime.getCompletion();
+                const word = try std.mem.concat(
+                    ime.dict.allocator,
+                    u8,
+                    &[_][]const u8{ ime.literal.items, comp },
+                );
+                try std.testing.expectEqual(results[result_ind][0], i);
+                try std.testing.expectEqualStrings(results[result_ind][1], word);
+                result_ind += 1;
+                std.testing.allocator.free(comp);
+                std.testing.allocator.free(word);
+            },
             .text => |frs| {
                 try std.testing.expectEqual(results[result_ind][0], i);
                 try std.testing.expectEqualStrings(results[result_ind][1], frs);
                 result_ind += 1;
                 std.testing.allocator.free(frs);
             },
-            else => std.debug.print("result {any} at index {d}\n", .{ fr, i }),
+            else => {},
         }
     }
 }
@@ -251,10 +268,28 @@ test "input basics" {
         &ime,
         "Et tis: Ro\tae\x0e\x0e\x1b\x08\x08age!\x08.",
         &[_]struct { usize, []const u8 }{
-            .{ 2, "Get " },
-            .{ 6, "this:" },
+            .{ 0, "Be" },
+            .{ 1, "Get" },
+            .{ 2, " " },
+            .{ 3, "the" },
+            .{ 4, "this" },
+            .{ 5, "this" },
+            .{ 6, ":" },
             .{ 7, " " },
-            .{ 21, "Fromage!" },
+            .{ 8, "From" },
+            .{ 9, "From" },
+            .{ 10, "From" },
+            .{ 11, "Froma" },
+            .{ 12, "Fromhave" },
+            .{ 13, "Frompage" },
+            .{ 14, "Fromae" },
+            .{ 15, "Fromae" },
+            .{ 16, "Froma" },
+            .{ 17, "From" },
+            .{ 18, "Froma" },
+            .{ 19, "Fromag" },
+            .{ 20, "Fromage" },
+            .{ 21, "!" },
             .{ 23, "." },
         },
     );
@@ -263,13 +298,19 @@ test "input basics" {
 test "new words" {
     var ime = ShrunkenInputMethod.init(std.testing.allocator);
     defer ime.deinit();
+    defer ime.dict.deepForEach(ime.dict.allocator, null, compile.freeWords);
     ime.usable_keys = compile.charsToSubset("acdeilnorstu");
     try testActions(
         &ime,
         "a\x0e\x1bv a.",
         &[_]struct { usize, []const u8 }{
-            .{ 4, "av " },
-            .{ 6, "av." },
+            .{ 0, "a" },
+            .{ 1, "a" },
+            .{ 2, "a" },
+            .{ 3, "av" },
+            .{ 4, " " },
+            .{ 5, "av" },
+            .{ 6, "." },
         },
     );
 }

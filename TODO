@@ -5,3 +5,4 @@ load from language-specific template
 rearrange keys by usage
 implement deter action
 arrow keys in completions
+distinguish case better
