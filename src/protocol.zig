@@ -53,7 +53,7 @@ pub fn handleKeysym(ime: *input.ShrunkenInputMethod, key: u8, writer: anytype) !
                     try writer.writeByte('\n');
                 },
                 .pass => if (ime.mode == .normal and normal_action == .backspace)
-                    try writer.writeAll("text:\x08\n")
+                    try writer.writeAll("text:\\\x08\n")
                 else
                     try writer.print(
                         "text:{s}{c}\n",

@@ -4,90 +4,97 @@ var ime_job: job = null_job
 var ime_channel: channel = null_channel
 var ime_enabled = false
 var saved_mappings: dict<dict<any>> = {}
-var last_word = ''
-var should_stopi = false
-var pending_keys = []
 
 # TODO: include the last few (| breaks things due to Vim syntax)
 const PRINTABLE_CHARS = map(range(33, 123), (_, n) => nr2char(n))
 const SPECIAL_KEYS = {
-    '<Space>': ' ', '<Tab>': '\t', '<CR>': '\n', '<BS>': '\b', '<Del>': '\x7f', '<Esc>': '\e'
+    '<Space>': ' ', '<Tab>': '\t', '<CR>': '\n', '<BS>': '\b', '<Del>': '\x7f'
 }
+const ALPHABET = "a-zA-Z0-9_'"
 
 def IMEOutput(channel: channel, msg: string)
     if !ime_enabled
         return
     endif
     
-    var lines = split(msg, "\n")
+    const lines = split(msg, "\n")
     for line in lines
         if line =~ '^word:'
             var word_text = substitute(line, '^word:', '', '')
             word_text = UnescapeString(word_text)
             IMEUpdateWordDisplay(word_text)
         elseif line =~ '^text:'
-            var chars = substitute(line, '^text:', '', '')
-            IMEProcessOutput(chars)
-            last_word = ''
+            IMEProcessOutput(substitute(line, '^text:', '', ''))
         elseif line =~ '^error:'
-            var error = UnescapeString(substitute(line, '^error:', '', ''))
+            const error = UnescapeString(substitute(line, '^error:', '', ''))
             echom "IME error:" error
-            last_word = ''
         endif
     endfor
 enddef
 
+def CleanANSI(raw: string): string
+    return substitute(raw, '\e\[[0-9;]*m', '', 'g')
+enddef
+
 def IMEUpdateWordDisplay(word: string)
-    if !empty(word)
-        last_word = word
+    const cleaned = CleanANSI(word)
+    const line_text = getline('.')
+    const col_pos = col('.') - 1
+    var word_start = match(
+        line_text[: col_pos],
+        printf('\([^%s]\|^\)[%s]\+$', ALPHABET, ALPHABET)
+    ) + 1
+    if word_start == 0
+        word_start = col_pos + 1
     endif
-    if exists('*nvim_buf_set_extmark')
-        # TODO: something cooler for Neovim
-    elseif exists('*prop_clear') && exists('*prop_add')
-        prop_clear(line('.'), line('.'), {'type': 'ime_word_state'})
-        if !empty(word)
-            # TODO: actually parse the ANSI escape sequences
-            var cleaned = substitute(word, '\e\[[0-9;]*m', '', 'g')
-            prop_add(line('.'), col('.'), {'text': ' ' .. cleaned, 'type': 'ime_word_state'})
-        endif
-    else
-        if empty(word)
-            echo ''
-        else
-            echohl Comment | echo '[' .. word .. ']' | echohl None
-        endif
+    var word_end = match(line_text, printf('\([^%s]\|$\)', ALPHABET), word_start)
+    if word_end == -1
+        word_end = word_start
     endif
+    const prefix = word_start < 2 ? '' : line_text[: word_start - 1]
+    setline('.', prefix .. cleaned .. line_text[word_end :])
+    cursor(line('.'), word_start + len(cleaned) + 1)
+enddef
+
+def InsertChars(chars: string)
+    const line_text = getline('.')
+    setline('.', line_text[0 : col('.') - 2] .. chars .. line_text[col('.') - 1 :])
+    cursor(line('.'), col('.') + len(chars))
 enddef
 
 def IMEProcessOutput(chars: string)
     if empty(chars)
         return
     endif
-    IMEUpdateWordDisplay('')
-    if should_stopi
-        feedkeys(chars[: -2] .. "\e", 'n')
-        for key in pending_keys
-            feedkeys(key, 'n')
-        endfor
-        pending_keys = []
-        should_stopi = false
-    else
-        var i = 0
-        while i < len(chars)
-            var char = chars[i]
-            if char == '\'
-                if i + 1 < len(chars)
-                    feedkeys(chars[i + 1], 'n')
-                    i += 1
+    var i = 0
+    while i < len(chars)
+        var char = chars[i]
+        if char ==# '\'
+            if i + 1 < len(chars)
+                char = chars[i + 1]
+                if char == "\x08"
+                    const line_text = getline('.')
+                    const suffix = line_text[col('.') - 1 :]
+                    setline('.', line_text[0 : col('.') - 3] .. suffix)
+                    if !empty(suffix)
+                        cursor(line('.'), col('.') - 1)
+                    endif
                 else
-                    feedkeys("\n", 'n')
+                    if &expandtab && char == "\x09"
+                        char = repeat(' ', &tabstop)
+                    endif
+                    InsertChars(char)
                 endif
+                i += 1
             else
-               feedkeys(char, 'n')
+                append('.', '')
+                cursor(line('.') + 1, col('.'))
             endif
-            i += 1
-        endwhile
-    endif
+        else
+           InsertChars(char)
+        endif
+        i += 1
+    endwhile
 enddef
 
 def EscapeString(str: string): string
@@ -99,23 +106,13 @@ def UnescapeString(str: string): string
 enddef
 
 def g:IMEHandleKey(key: string)
-    if should_stopi
-        add(pending_keys, key)
-        return
-    endif
     if !ime_enabled || ime_channel == null_channel
         feedkeys(key, 'n')
         return
     endif
     
     try
-        if (key ==# "\e") && !empty(last_word)
-            should_stopi = true
-            ch_sendraw(ime_channel, " ")
-        else
-            echom "Sending to IME" key "end"
-            ch_sendraw(ime_channel, key)
-        endif
+        ch_sendraw(ime_channel, key)
     catch
         echom "IME communication error:" v:exception
         IMEDisable()
@@ -126,7 +123,7 @@ enddef
 def IMESaveCurrentMappings()
     saved_mappings = {}
     for char in PRINTABLE_CHARS + keys(SPECIAL_KEYS)
-        var mapping_info = maparg(char, 'i', false, true)
+        const mapping_info = maparg(char, 'i', false, true)
         if !empty(mapping_info)
             saved_mappings[char] = mapping_info
         endif
@@ -165,7 +162,7 @@ export def IMEEnable(dataset_file: string = '')
         return
     endif
     
-    var ime_executable = get(
+    const ime_executable = get(
         g:, 'ime_executable',
         expand('<script>:p:h') .. '/zig-out/bin/keyboard_shrinker'
     )
@@ -196,6 +193,7 @@ export def IMEEnable(dataset_file: string = '')
         ch_sendraw(ime_channel, "\n")
         
         IMESetupMappings()
+        # TODO: this'll be redundant
         if exists('*prop_type_add')
             call prop_type_delete('ime_word_state')
             call prop_type_add('ime_word_state', {'highlight': 'Underlined'})
@@ -248,7 +246,7 @@ command! IMEDisable call IMEDisable()
 
 augroup IMEModeChange
     autocmd!
-    autocmd InsertLeave * if ime_enabled | call IMEUpdateWordDisplay('') | endif
+    #autocmd InsertLeave * if ime_enabled | call IMEUpdateWordDisplay('') | endif
 augroup END
 
 augroup IMECleanup
