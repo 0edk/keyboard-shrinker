@@ -44,7 +44,7 @@ enddef
 def IMEUpdateWordDisplay(word: string)
     const cleaned = CleanANSI(word)
     const line_text = getline('.')
-    const col_pos = col('.') - 1
+    const col_pos = col('.') - 2
     var word_start = match(
         line_text[: col_pos],
         printf('\([^%s]\|^\)[%s]\+$', ALPHABET, ALPHABET)
