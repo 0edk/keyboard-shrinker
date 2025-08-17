@@ -4,16 +4,21 @@ var ime_job: job = null_job
 var ime_channel: channel = null_channel
 var ime_enabled = false
 var saved_mappings: dict<dict<any>> = {}
+var ignore_resp = false
 
 # TODO: include the last few (| breaks things due to Vim syntax)
 const PRINTABLE_CHARS = map(range(33, 123), (_, n) => nr2char(n))
 const SPECIAL_KEYS = {
-    '<Space>': ' ', '<Tab>': '\t', '<CR>': '\n', '<BS>': '\b', '<Del>': '\x7f'
+    '<Space>': ' ', '<Tab>': '\t', '<CR>': '\n', '<BS>': '\b', '<Del>': '\x7f', '<Esc>': '\e'
 }
 const ALPHABET = "a-zA-Z0-9_'"
 
 def IMEOutput(channel: channel, msg: string)
     if !ime_enabled
+        return
+    endif
+    if ignore_resp
+        ignore_resp = false
         return
     endif
     
@@ -112,7 +117,16 @@ def g:IMEHandleKey(key: string)
     endif
     
     try
-        ch_sendraw(ime_channel, key)
+        var tkey = key
+        if key == "\e"
+            stopinsert
+            ignore_resp = true
+            tkey = ' '
+        elseif key == "\n"
+            feedkeys(key, 'n')
+            ignore_resp = true
+        endif
+        ch_sendraw(ime_channel, tkey)
     catch
         echom "IME communication error:" v:exception
         IMEDisable()
