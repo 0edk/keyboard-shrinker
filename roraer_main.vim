@@ -170,6 +170,10 @@ def IMESetupMappings()
     endfor
 enddef
 
+def ProjectList(): list<string>
+    return split(glob(expand('%:h') .. '/**/*.' .. expand('%:e')), "\n")
+enddef
+
 export def IMEEnable(dataset_file: string = '')
     if ime_enabled
         echom "IME already enabled"
@@ -185,8 +189,6 @@ export def IMEEnable(dataset_file: string = '')
         return
     endif
     
-    var dataset = empty(dataset_file) ? expand('%:p') : dataset_file
-    
     IMESaveCurrentMappings()
     
     try
@@ -201,20 +203,19 @@ export def IMEEnable(dataset_file: string = '')
         endif
         ime_channel = job_getchannel(ime_job)
         
-        if !empty(dataset)
-            ch_sendraw(ime_channel, 'raw:' .. EscapeString(dataset) .. "\n")
+        if empty(dataset_file)
+            for file in ProjectList()
+                ch_sendraw(ime_channel, 'raw:' .. EscapeString(file) .. "\n")
+            endfor
+        else
+            ch_sendraw(ime_channel, 'raw:' .. EscapeString(dataset_file) .. "\n")
         endif
         ch_sendraw(ime_channel, "\n")
         
         IMESetupMappings()
-        # TODO: this'll be redundant
-        if exists('*prop_type_add')
-            call prop_type_delete('ime_word_state')
-            call prop_type_add('ime_word_state', {'highlight': 'Underlined'})
-        endif
         
         ime_enabled = true
-        echom "IME enabled with dataset:" fnamemodify(dataset, ':t')
+        echom "IME enabled" (empty(dataset_file) ? '' : "with dataset: " .. dataset_file)
     catch
         echom "Failed to start IME:" v:exception
         IMECleanup()
