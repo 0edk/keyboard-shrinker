@@ -13,17 +13,13 @@ fn shouldEscape(c: u8) bool {
 }
 
 pub fn populateFromRaw(dict: *compile.WordList, reader: anytype) !void {
-    var arena = std.heap.ArenaAllocator.init(dict.allocator);
-    defer arena.deinit();
-    const wl_alloc = arena.allocator();
     while (try reader.readUntilDelimiterOrEofAlloc(dict.allocator, '\n', 1024)) |line| {
         var it = std.mem.tokenizeAny(u8, line, non_letters);
         while (it.next()) |word| {
-            const lowered = try std.ascii.allocLowerString(wl_alloc, word);
-            if (dict.getPtr(lowered)) |ww| {
+            if (dict.getPtr(word)) |ww| {
                 ww.weight += 1;
             } else {
-                try dict.put(lowered, .{ .word = word, .weight = 1 });
+                try dict.put(word, .{ .word = word, .weight = 1 });
             }
         }
     }
