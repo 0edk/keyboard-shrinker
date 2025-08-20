@@ -1,0 +1,15 @@
+break
+:
+continue
+.
+eval
+exec
+exit
+export
+readonly
+return
+set
+shift
+times
+trap
+unset
