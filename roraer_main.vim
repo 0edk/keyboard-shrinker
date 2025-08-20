@@ -174,6 +174,10 @@ def ProjectList(): list<string>
     return split(glob(expand('%:h') .. '/**/*.' .. expand('%:e')), "\n")
 enddef
 
+def LoadDataset(path: string, mode = 'raw')
+    ch_sendraw(ime_channel, 'raw:' .. EscapeString(path) .. "\n")
+enddef
+
 export def IMEEnable(dataset_file: string = '')
     if ime_enabled
         echom "IME already enabled"
@@ -185,7 +189,7 @@ export def IMEEnable(dataset_file: string = '')
         expand('<script>:p:h') .. '/zig-out/bin/keyboard_shrinker'
     )
     if !executable(ime_executable)
-        echoerr "IME executable not found:" ime_executable
+        echom "IME executable not found:" ime_executable
         return
     endif
     
@@ -203,12 +207,26 @@ export def IMEEnable(dataset_file: string = '')
         endif
         ime_channel = job_getchannel(ime_job)
         
+        if !empty(&syntax)
+            const syntax_dir = get(
+                g:, 'ime_syntax',
+                expand('<script>:p:h') .. '/syntax'
+            )
+            if isdirectory(syntax_dir)
+                const syntax_file = syntax_dir .. '/' .. &syntax
+                if filereadable(syntax_file)
+                    LoadDataset(syntax_file)
+                else
+                    echoerr "No syntax guide for" &syntax
+                endif
+            endif
+        endif
         if empty(dataset_file)
             for file in ProjectList()
-                ch_sendraw(ime_channel, 'raw:' .. EscapeString(file) .. "\n")
+                LoadDataset(file)
             endfor
         else
-            ch_sendraw(ime_channel, 'raw:' .. EscapeString(dataset_file) .. "\n")
+            LoadDataset(dataset_file)
         endif
         ch_sendraw(ime_channel, "\n")
         
