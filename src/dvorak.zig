@@ -9,6 +9,13 @@ pub const default_subset = compile.charsToSubset(default_letters);
 const capital_numbers = ")!@#$%^&*(";
 
 pub fn charToInsert(c: u8) ?input.Action {
+    if (std.ascii.isDigit(c)) {
+        return .{ .char = capital_numbers[c - '0'] };
+    }
+    if (std.mem.indexOfScalar(u8, capital_numbers, c)) |i| {
+        const i_cast: u8 = @intCast(i);
+        return .{ .char = '0' + i_cast };
+    }
     if (std.ascii.isPrint(c)) {
         return .{ .char = c };
     }
@@ -25,13 +32,7 @@ pub fn charToNormal(c: u8) ?input.Action {
             return .{ .char = c };
         }
     }
-    if (std.mem.indexOfScalar(u8, capital_numbers, c)) |i| {
-        const i_cast: u8 = @intCast(i);
-        return .{ .char = '0' + i_cast };
-    }
     return switch (c) {
-        '0'...'9' => .{ .char = capital_numbers[c - '0'] },
-        '\'' => .{ .char = '-' },
         'p' => .finish_partial,
         'y' => .{ .char = '`' },
         'Y' => .{ .char = '~' },

@@ -8,8 +8,7 @@ pub fn charToLetter(char: u8) ?Letter {
     return switch (char) {
         'A'...'Z' => @intCast(char - 'A'),
         'a'...'z' => @intCast(char - 'a'),
-        '\'' => 26,
-        '_' => 27,
+        '_' => 26,
         else => null,
     };
 }
@@ -30,8 +29,7 @@ pub fn charsToLetters(
 pub fn letterToChar(letter: Letter) ?u8 {
     return switch (letter) {
         0...25 => @as(u8, letter) + 'a',
-        26 => '\'',
-        27 => '_',
+        26 => '_',
         else => null,
     };
 }
