@@ -138,6 +138,7 @@ struct
 subprocess
 sunau
 symtable
+sys
 sysconfig
 tabnanny
 tarfile
