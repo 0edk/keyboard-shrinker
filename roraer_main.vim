@@ -45,26 +45,21 @@ def IMEUpdateWordDisplay(word: string)
     const cleaned = CleanANSI(word)
     const line_text = getline('.')
     const col_pos = col('.') - 2
-    var word_start = match(
-        line_text[: col_pos],
-        printf('\([^%s]\|^\)[%s]\+$', ALPHABET, ALPHABET)
-    ) + 1
-    if word_start == 0
-        word_start = col_pos + 1
-    endif
-    var word_end = match(line_text, printf('\([^%s]\|$\)', ALPHABET), word_start)
-    if word_end == -1
-        word_end = word_start
-    endif
-    const prefix = word_start < 2 ? '' : line_text[: word_start - 1]
-    setline('.', prefix .. cleaned .. line_text[word_end :])
-    cursor(line('.'), word_start + len(cleaned) + 1)
+    var word_start = col_pos
+    while word_start >= 0 && line_text[word_start] =~ '[' .. ALPHABET .. ']'
+        word_start -= 1
+    endwhile
+    const prefix = word_start < 0 ? '' : line_text[: word_start]
+    setline('.', prefix .. cleaned .. line_text[col_pos + 1 :])
+    cursor(line('.'), word_start + len(cleaned) + 2)
 enddef
 
 def InsertChars(chars: string)
     const line_text = getline('.')
-    setline('.', line_text[0 : col('.') - 2] .. chars .. line_text[col('.') - 1 :])
-    cursor(line('.'), col('.') + len(chars))
+    const col_pos = col('.')
+    const prefix = col_pos > 1 ? line_text[0 : col_pos - 2] : ''
+    setline('.', prefix .. chars .. line_text[col_pos - 1 :])
+    cursor(line('.'), col_pos + len(chars))
 enddef
 
 def IMEProcessOutput(chars: string)
@@ -171,7 +166,11 @@ def IMESetupMappings()
 enddef
 
 def ProjectList(): list<string>
-    return split(glob(expand('%:h') .. '/**/*.' .. expand('%:e')), "\n")
+    if empty(expand('%h'))
+        return []
+    else
+        return split(glob(expand('%:h') .. '/**/*.' .. expand('%:e')), "\n")
+    endif
 enddef
 
 def LoadDataset(path: string, mode = 'raw')
@@ -217,7 +216,7 @@ export def IMEEnable(dataset_file: string = '')
                 if filereadable(syntax_file)
                     LoadDataset(syntax_file)
                 else
-                    echoerr "No syntax guide for" &syntax
+                    echom "No syntax guide for" &syntax
                 endif
             endif
         endif

@@ -3,7 +3,7 @@ const compile = @import("compile.zig");
 const input = @import("input.zig");
 const dvorak = @import("dvorak.zig");
 
-const non_letters = "\t\r\n !\"#$%&()*+,./:;<=>?@[\\]^`{|}";
+const non_letters = "\t\r\n !\"#$%&()*+,-./:;<=>?@[\\]^`{|}";
 
 fn shouldEscape(c: u8) bool {
     return switch (c) {
