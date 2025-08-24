@@ -11,7 +11,7 @@ const PRINTABLE_CHARS = map(range(33, 123), (_, n) => nr2char(n))
 const SPECIAL_KEYS = {
     '<Space>': ' ', '<Tab>': '\t', '<CR>': '\n', '<BS>': '\b', '<Del>': '\x7f', '<Esc>': '\e'
 }
-const ALPHABET = "a-zA-Z0-9_'"
+const ALPHABET = "a-zA-Z0-9_"
 
 def IMEOutput(channel: channel, msg: string)
     if !ime_enabled
@@ -55,11 +55,7 @@ def IMEUpdateWordDisplay(word: string)
 enddef
 
 def InsertChars(chars: string)
-    const line_text = getline('.')
-    const col_pos = col('.')
-    const prefix = col_pos > 1 ? line_text[0 : col_pos - 2] : ''
-    setline('.', prefix .. chars .. line_text[col_pos - 1 :])
-    cursor(line('.'), col_pos + len(chars))
+    feedkeys(chars, 'n')
 enddef
 
 def IMEProcessOutput(chars: string)
@@ -71,28 +67,13 @@ def IMEProcessOutput(chars: string)
         var char = chars[i]
         if char ==# '\'
             if i + 1 < len(chars)
-                char = chars[i + 1]
-                if char == "\x08"
-                    const line_text = getline('.')
-                    const suffix = line_text[col('.') - 1 :]
-                    setline('.', line_text[0 : col('.') - 3] .. suffix)
-                    if !empty(suffix)
-                        cursor(line('.'), col('.') - 1)
-                    endif
-                else
-                    if &expandtab && char == "\x09"
-                        char = repeat(' ', &tabstop)
-                    endif
-                    InsertChars(char)
-                endif
                 i += 1
+                char = chars[i]
             else
-                append('.', '')
-                cursor(line('.') + 1, col('.'))
+                char = "\n"
             endif
-        else
-           InsertChars(char)
         endif
+        InsertChars(char)
         i += 1
     endwhile
 enddef
