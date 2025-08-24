@@ -39,7 +39,7 @@ pub fn handleKeysym(ime: *input.ShrunkenInputMethod, key: u8, writer: anytype) !
                     defer ime.dict.allocator.free(s);
                     try writer.writeAll("text:");
                     var start: usize = 0;
-                    while (std.mem.indexOfAnyPos(u8, s, start, "\n:\\")) |esc_ind| {
+                    while (std.mem.indexOfAnyPos(u8, s, start, "\t\n:\\")) |esc_ind| {
                         try writer.writeAll(s[start..esc_ind]);
                         try writer.writeByte('\\');
                         try writer.writeByte(s[esc_ind]);
