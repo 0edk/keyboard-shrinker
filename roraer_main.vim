@@ -130,7 +130,7 @@ def RestoreMappings()
             var cmd = (mapping_info.noremap ? 'inoremap' : 'imap')
             cmd ..= (mapping_info.silent ? ' <silent>' : '')
             cmd ..= (mapping_info.expr ? ' <expr>' : '')
-            cmd ..= ' ' .. key .. ' ' .. mapping_info.rhs
+            cmd ..= ' ' .. escape(key, '|') .. ' ' .. mapping_info.rhs
             execute cmd
         endif
     endfor
@@ -164,44 +164,48 @@ export def IMEEnable(dataset_file: string = '')
         return
     endif
     const ime_executable = tolower(IME_NAME)
-    if !executable(ime_executable)
-        echom "IME executable not found:" ime_executable
-        return
+    if ch_status(ime_channel) !=# 'open'
+        if !executable(ime_executable)
+            echom "IME executable not found:" ime_executable
+            return
+        endif
     endif
     SaveCurrentMappings()
     try
-        ime_job = job_start(ime_executable, {
-            'in_mode': 'raw',
-            'out_mode': 'raw',
-            'out_cb': function('IMEOutput'),
-            'close_cb': function('IMECloseCallback')
-        })
-        if job_status(ime_job) != 'run'
-            throw "Failed to start IME process"
-        endif
-        ime_channel = job_getchannel(ime_job)
-        if !empty(&syntax)
-            const syntax_dir = get(
-                g:, 'ime_syntax',
-                expand('<script>:p:h') .. '/syntax'
-            )
-            if isdirectory(syntax_dir)
-                const syntax_file = syntax_dir .. '/' .. &syntax
-                if filereadable(syntax_file)
-                    LoadDataset(syntax_file)
-                else
-                    echom "No syntax guide for" &syntax
+        if ch_status(ime_channel) !=# 'open'
+            ime_job = job_start(ime_executable, {
+                'in_mode': 'raw',
+                'out_mode': 'raw',
+                'out_cb': function('IMEOutput'),
+                'close_cb': function('IMECloseCallback')
+            })
+            if job_status(ime_job) != 'run'
+                throw "Failed to start IME process"
+            endif
+            ime_channel = job_getchannel(ime_job)
+            if !empty(&syntax)
+                const syntax_dir = get(
+                    g:, 'ime_syntax',
+                    expand('<script>:p:h') .. '/syntax'
+                )
+                if isdirectory(syntax_dir)
+                    const syntax_file = syntax_dir .. '/' .. &syntax
+                    if filereadable(syntax_file)
+                        LoadDataset(syntax_file)
+                    else
+                        echom "No syntax guide for" &syntax
+                    endif
                 endif
             endif
+            if empty(dataset_file)
+                for file in ProjectList()
+                    LoadDataset(file)
+                endfor
+            else
+                LoadDataset(dataset_file)
+            endif
+            ch_sendraw(ime_channel, "\n")
         endif
-        if empty(dataset_file)
-            for file in ProjectList()
-                LoadDataset(file)
-            endfor
-        else
-            LoadDataset(dataset_file)
-        endif
-        ch_sendraw(ime_channel, "\n")
         SetupMappings()
         ime_enabled = true
         echom printf(
@@ -247,8 +251,22 @@ def IMECleanup()
     ime_job = null_job
 enddef
 
+export def IMEPause()
+    ime_enabled = false
+    if !empty(saved_mappings)
+        RestoreMappings()
+    endif
+    echom IME_NAME "paused"
+enddef
+
 execute printf('command! -nargs=? %sEnable call IMEEnable(<q-args>)', IME_NAME)
 execute printf('command! %sDisable call IMEDisable()', IME_NAME)
+execute printf('command! %sPause call IMEPause()', IME_NAME)
+
+augroup IMEEnable
+    autocmd!
+    autocmd VimEnter * call IMEEnable()
+augroup END
 
 augroup IMECleanup
     autocmd!
