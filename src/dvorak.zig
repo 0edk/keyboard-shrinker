@@ -9,6 +9,9 @@ pub const default_subset = compile.charsToSubset(default_letters);
 const capital_numbers = ")!@#$%^&*(";
 
 pub fn charToInsert(c: u8) ?input.Action {
+    if (c == ' ') {
+        return .to_normal;
+    }
     if (std.ascii.isDigit(c)) {
         return .{ .char = capital_numbers[c - '0'] };
     }
@@ -20,6 +23,7 @@ pub fn charToInsert(c: u8) ?input.Action {
         return .{ .char = c };
     }
     return switch (c) {
+        control_code.eot => .to_normal,
         control_code.bs, control_code.del => .backspace,
         control_code.cr, control_code.lf => .{ .char = '\n' },
         else => null,
@@ -33,6 +37,7 @@ pub fn charToNormal(c: u8) ?input.Action {
         }
     }
     return switch (c) {
+        ' ' => .{ .char = ' ' },
         'p' => .{ .char = '-' },
         'y' => .{ .char = '`' },
         'Y' => .{ .char = '~' },

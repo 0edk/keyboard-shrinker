@@ -151,7 +151,11 @@ pub const ShrunkenInputMethod = struct {
                     self.mode = .normal;
                     return .pass;
                 },
-                .to_normal => self.mode = .normal,
+                .to_normal => {
+                    try self.finishWord();
+                    self.mode = .normal;
+                    return .{ .text = "" };
+                },
                 // TODO
                 else => return .silent,
             }
@@ -198,7 +202,10 @@ pub const ShrunkenInputMethod = struct {
                     self.query.clearRetainingCapacity();
                     self.mode = .insert;
                 },
-                .to_normal => return .silent,
+                .to_normal => {
+                    try self.finishWord();
+                    return .{ .text = "" };
+                },
             }
         }
         return .silent;

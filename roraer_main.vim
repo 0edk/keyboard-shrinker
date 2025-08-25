@@ -4,7 +4,6 @@ var ime_job: job = null_job
 var ime_channel: channel = null_channel
 var ime_enabled = false
 var saved_mappings: dict<dict<any>> = {}
-var ignore_resp = false
 
 const PRINTABLE_CHARS = map(range(33, 126), (_, n) => nr2char(n))
 const SPECIAL_KEYS = {
@@ -15,10 +14,6 @@ const IME_NAME = 'Roraer'
 
 def IMEOutput(channel: channel, msg: string)
     if !ime_enabled
-        return
-    endif
-    if ignore_resp
-        ignore_resp = false
         return
     endif
     
@@ -96,11 +91,7 @@ def g:IMEHandleKey(key: string)
         var tkey = key
         if key == "\e"
             stopinsert
-            ignore_resp = true
-            tkey = ' '
-        elseif key == "\n"
-            feedkeys(key, 'n')
-            ignore_resp = true
+            tkey = "\x04"
         endif
         ch_sendraw(ime_channel, tkey)
     catch
@@ -237,7 +228,6 @@ export def IMEDisable()
 enddef
 
 def IMECleanup()
-    IMEUpdateWordDisplay('')
     if !empty(saved_mappings)
         RestoreMappings()
     endif

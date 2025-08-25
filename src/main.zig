@@ -65,7 +65,7 @@ pub fn main() !void {
     defer input_acc.deinit();
 
     var short_buf: [1]u8 = undefined;
-    while (try stdin.read(&short_buf) == 1 and short_buf[0] != 3 and short_buf[0] != 4) {
+    while (try stdin.read(&short_buf) == 1 and short_buf[0] != 3) {
         try protocol.handleKeysym(&ime, short_buf[0], stdout);
         try bw.flush();
     }
