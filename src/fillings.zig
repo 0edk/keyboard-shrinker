@@ -46,9 +46,17 @@ pub const Completer = struct {
         while (try self.adjustChoice()) {}
     }
 
-    pub fn getCompletion(self: *const Self) Allocator.Error!?[]const u8 {
+    pub fn getCompletionClass(self: *const Self) ?Completion {
         if (self.choice) |inds| {
-            return self.completions.items[inds[0]].node.leaf.?.items[inds[1]].word;
+            return self.completions.items[inds[0]];
+        } else {
+            return null;
+        }
+    }
+
+    pub fn getCompletion(self: *const Self) ?[]const u8 {
+        if (self.choice) |inds| {
+            return self.getCompletionClass().?.node.leaf.?.items[inds[1]].word;
         } else {
             return null;
         }

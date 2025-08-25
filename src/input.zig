@@ -73,7 +73,7 @@ pub const ShrunkenInputMethod = struct {
     }
 
     pub fn getCompletion(self: *const Self) Allocator.Error![]u8 {
-        const raw, const should_free = if (try self.completions.getCompletion()) |comp|
+        const raw, const should_free = if (self.completions.getCompletion()) |comp|
             .{ comp, false }
         else if (self.query.items.len > 0) blk: {
             const char_list = try letters.lettersToChars(self.dict.allocator, self.query.items);
@@ -168,7 +168,6 @@ pub const ShrunkenInputMethod = struct {
                         } else if (self.casing == .all_caps and std.ascii.isLower(c)) {
                             self.casing = .title;
                         }
-                        if (self.completions.inferred()) |s| try self.query.appendSlice(s);
                         try self.query.append(l);
                         try self.resetCompletions();
                     }
@@ -184,8 +183,10 @@ pub const ShrunkenInputMethod = struct {
                     return .pass;
                 },
                 .finish_partial => {
-                    try self.literalise();
-                    self.casing = .unchanged;
+                    if (self.completions.getCompletionClass()) |class| {
+                        try self.query.appendSlice(class.suffix);
+                        try self.resetCompletions();
+                    }
                 },
                 .next => {
                     try self.completions.advance();
@@ -194,7 +195,7 @@ pub const ShrunkenInputMethod = struct {
                 // TODO
                 .deter => return .silent,
                 .to_insert => {
-                    try self.literalise();
+                    self.query.clearRetainingCapacity();
                     self.mode = .insert;
                 },
                 .to_normal => return .silent,
@@ -224,7 +225,7 @@ fn testActions(
             ime.handleAction(.{ .char = ' ' }, action, false);
         switch (fr) {
             .silent => {
-                const comp = try ime.getCompletion();
+                const comp = ime.getCompletion();
                 const word = try std.mem.concat(
                     ime.dict.allocator,
                     u8,
