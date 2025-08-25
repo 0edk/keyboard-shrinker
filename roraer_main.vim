@@ -6,12 +6,12 @@ var ime_enabled = false
 var saved_mappings: dict<dict<any>> = {}
 var ignore_resp = false
 
-# TODO: include the last few (| breaks things due to Vim syntax)
-const PRINTABLE_CHARS = map(range(33, 123), (_, n) => nr2char(n))
+const PRINTABLE_CHARS = map(range(33, 126), (_, n) => nr2char(n))
 const SPECIAL_KEYS = {
     '<Space>': ' ', '<Tab>': '\t', '<CR>': '\n', '<BS>': '\b', '<Del>': '\x7f', '<Esc>': '\e'
 }
 const ALPHABET = "a-zA-Z0-9_"
+const IME_NAME = 'Roraer'
 
 def IMEOutput(channel: channel, msg: string)
     if !ime_enabled
@@ -110,7 +110,7 @@ def g:IMEHandleKey(key: string)
     endtry
 enddef
 
-def IMESaveCurrentMappings()
+def SaveCurrentMappings()
     saved_mappings = {}
     for char in PRINTABLE_CHARS + keys(SPECIAL_KEYS)
         const mapping_info = maparg(char, 'i', false, true)
@@ -120,9 +120,9 @@ def IMESaveCurrentMappings()
     endfor
 enddef
 
-def IMERestoreMappings()
+def RestoreMappings()
     for char in PRINTABLE_CHARS + keys(SPECIAL_KEYS)
-        execute printf('iunmap <silent> %s', char)
+        execute printf('iunmap <silent> %s', char == '|' ? '\|' : char)
     endfor
     
     for [key, mapping_info] in items(saved_mappings)
@@ -137,17 +137,17 @@ def IMERestoreMappings()
     saved_mappings = {}
 enddef
 
-def IMESetupMappings()
+def SetupMappings()
     for char in PRINTABLE_CHARS + keys(SPECIAL_KEYS)
         execute printf(
             'inoremap <silent> %s <Cmd>call g:IMEHandleKey("%s")<CR>',
-            char, get(SPECIAL_KEYS, char, escape(char, '\"'))
+            escape(char, '|'), get(SPECIAL_KEYS, char, escape(char, '"\|'))
         )
     endfor
 enddef
 
 def ProjectList(): list<string>
-    if empty(expand('%h'))
+    if empty(expand('%'))
         return []
     else
         return split(glob(expand('%:h') .. '/**/*.' .. expand('%:e')), "\n")
@@ -155,26 +155,20 @@ def ProjectList(): list<string>
 enddef
 
 def LoadDataset(path: string, mode = 'raw')
-    ch_sendraw(ime_channel, 'raw:' .. EscapeString(path) .. "\n")
+    ch_sendraw(ime_channel, mode .. ':' .. EscapeString(path) .. "\n")
 enddef
 
 export def IMEEnable(dataset_file: string = '')
     if ime_enabled
-        echom "IME already enabled"
+        echom IME_NAME "already enabled"
         return
     endif
-    
-    const ime_executable = get(
-        g:, 'ime_executable',
-        expand('<script>:p:h') .. '/zig-out/bin/keyboard_shrinker'
-    )
+    const ime_executable = tolower(IME_NAME)
     if !executable(ime_executable)
         echom "IME executable not found:" ime_executable
         return
     endif
-    
-    IMESaveCurrentMappings()
-    
+    SaveCurrentMappings()
     try
         ime_job = job_start(ime_executable, {
             'in_mode': 'raw',
@@ -186,7 +180,6 @@ export def IMEEnable(dataset_file: string = '')
             throw "Failed to start IME process"
         endif
         ime_channel = job_getchannel(ime_job)
-        
         if !empty(&syntax)
             const syntax_dir = get(
                 g:, 'ime_syntax',
@@ -209,13 +202,15 @@ export def IMEEnable(dataset_file: string = '')
             LoadDataset(dataset_file)
         endif
         ch_sendraw(ime_channel, "\n")
-        
-        IMESetupMappings()
-        
+        SetupMappings()
         ime_enabled = true
-        echom "IME enabled" (empty(dataset_file) ? '' : "with dataset: " .. dataset_file)
+        echom printf(
+            "%s enabled %s",
+            IME_NAME,
+            (empty(dataset_file) ? '' : "with dataset: " .. dataset_file),
+        )
     catch
-        echom "Failed to start IME:" v:exception
+        echom printf("Failed to start %s: %s", IME_NAME, v:exception)
         IMECleanup()
     endtry
 enddef
@@ -234,16 +229,14 @@ export def IMEDisable()
     
     ime_enabled = false
     IMECleanup()
-    echom "IME disabled"
+    echom IME_NAME "disabled"
 enddef
 
 def IMECleanup()
     IMEUpdateWordDisplay('')
-    
     if !empty(saved_mappings)
-        IMERestoreMappings()
+        RestoreMappings()
     endif
-    
     if ch_status(ime_channel) ==# 'open'
         ch_close(ime_channel)
         ime_channel = null_channel
@@ -254,13 +247,8 @@ def IMECleanup()
     ime_job = null_job
 enddef
 
-command! -nargs=? IMEEnable call IMEEnable(<q-args>)
-command! IMEDisable call IMEDisable()
-
-augroup IMEModeChange
-    autocmd!
-    #autocmd InsertLeave * if ime_enabled | call IMEUpdateWordDisplay('') | endif
-augroup END
+execute printf('command! -nargs=? %sEnable call IMEEnable(<q-args>)', IME_NAME)
+execute printf('command! %sDisable call IMEDisable()', IME_NAME)
 
 augroup IMECleanup
     autocmd!
