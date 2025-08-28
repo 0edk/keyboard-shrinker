@@ -165,4 +165,14 @@ pub const Completer = struct {
         }
         self.slid = true;
     }
+
+    pub fn deter(self: *Self) void {
+        if (self.getCompletionClass()) |comp| {
+            if (comp.node.leaf) |words| {
+                std.debug.assert(words.items.len > 0);
+                words.items[self.choice.?[1]].weight = 0;
+                compile.sortLeaf({}, words);
+            }
+        }
+    }
 };

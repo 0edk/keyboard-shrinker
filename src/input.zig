@@ -196,10 +196,10 @@ pub const ShrunkenInputMethod = struct {
                     try self.completions.advance();
                 },
                 .previous => try self.completions.retreat(),
-                // TODO
-                .deter => return .silent,
+                .deter => self.completions.deter(),
                 .to_insert => {
                     self.query.clearRetainingCapacity();
+                    try self.resetCompletions();
                     self.mode = .insert;
                 },
                 .to_normal => {
