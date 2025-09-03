@@ -174,6 +174,7 @@ export def IMEEnable(dataset_file: string = '')
                 throw "Failed to start IME process"
             endif
             ime_channel = job_getchannel(ime_job)
+            var loaded_syntax = false
             if !empty(&syntax)
                 const syntax_dir = get(
                     g:, 'ime_syntax',
@@ -183,15 +184,20 @@ export def IMEEnable(dataset_file: string = '')
                     const syntax_file = syntax_dir .. '/' .. &syntax
                     if filereadable(syntax_file)
                         LoadDataset(syntax_file)
+                        loaded_syntax = true
                     else
                         echom "No syntax guide for" &syntax
                     endif
                 endif
             endif
             if empty(dataset_file)
-                for file in ProjectList()
-                    LoadDataset(file)
-                endfor
+                if loaded_syntax
+                    for file in ProjectList()
+                        LoadDataset(file)
+                    endfor
+                elseif filereadable(expand('%'))
+                    LoadDataset(expand('%'))
+                endif
             else
                 LoadDataset(dataset_file)
             endif
