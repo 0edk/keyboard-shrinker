@@ -195,8 +195,11 @@ export def IMEEnable(dataset_file: string = '')
                     for file in ProjectList()
                         LoadDataset(file)
                     endfor
-                elseif filereadable(expand('%'))
+                elseif getfsize(expand('%')) > 0
                     LoadDataset(expand('%'))
+                else
+                    IMECleanup()
+                    return
                 endif
             else
                 LoadDataset(dataset_file)
