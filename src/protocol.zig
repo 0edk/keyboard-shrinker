@@ -3,7 +3,19 @@ const compile = @import("compile.zig");
 const input = @import("input.zig");
 const dvorak = @import("dvorak.zig");
 
-const non_letters = "\t\r\n !\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~";
+fn charRange(comptime start: u8, comptime end: u8) [end - start]u8 {
+    comptime {
+        var list: [end - start]u8 = undefined;
+        for (start..end) |i| {
+            list[i - start] = i;
+        }
+        return list;
+    }
+}
+
+const non_letters = charRange(0, ' ') ++ charRange(' ', '0') ++
+    charRange(':', 'A') ++ charRange('[', 'a') ++
+    charRange('{', 0x80) ++ charRange(0x80, 0xff);
 
 fn shouldEscape(c: u8) bool {
     return switch (c) {
@@ -14,7 +26,7 @@ fn shouldEscape(c: u8) bool {
 
 pub fn populateFromRaw(dict: *compile.WordList, reader: anytype) !void {
     while (try reader.readUntilDelimiterOrEofAlloc(dict.allocator, '\n', 1024)) |line| {
-        var it = std.mem.tokenizeAny(u8, line, non_letters);
+        var it = std.mem.tokenizeAny(u8, line, &non_letters);
         while (it.next()) |word| {
             if (dict.getPtr(word)) |ww| {
                 ww.weight += 1;
