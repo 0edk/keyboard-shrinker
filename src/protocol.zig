@@ -14,7 +14,7 @@ fn charRange(comptime start: u8, comptime end: u8) [end - start]u8 {
 }
 
 const non_letters = charRange(0, ' ') ++ charRange(' ', '0') ++
-    charRange(':', 'A') ++ charRange('[', 'a') ++
+    charRange(':', 'A') ++ "[\\]^`" ++
     charRange('{', 0x80) ++ charRange(0x80, 0xff);
 
 fn shouldEscape(c: u8) bool {
@@ -26,7 +26,7 @@ fn shouldEscape(c: u8) bool {
 
 pub fn populateFromRaw(dict: *compile.WordList, reader: anytype) !void {
     while (try reader.readUntilDelimiterOrEofAlloc(dict.allocator, '\n', 1024)) |line| {
-        var it = std.mem.tokenizeAny(u8, line, &non_letters);
+        var it = std.mem.tokenizeAny(u8, line, non_letters);
         while (it.next()) |word| {
             if (dict.getPtr(word)) |ww| {
                 ww.weight += 1;
