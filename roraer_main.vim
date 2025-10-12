@@ -163,56 +163,49 @@ export def IMEEnable(dataset_file: string = '')
     endif
     SaveCurrentMappings()
     try
-        if ch_status(ime_channel) !=# 'open'
-            ime_job = job_start(ime_executable, {
-                'in_mode': 'raw',
-                'out_mode': 'raw',
-                'out_cb': function('IMEOutput'),
-                'close_cb': function('IMECloseCallback')
-            })
-            if job_status(ime_job) != 'run'
-                throw "Failed to start IME process"
-            endif
-            ime_channel = job_getchannel(ime_job)
-            var loaded_syntax = false
-            if !empty(&syntax)
-                const syntax_dir = get(
-                    g:, 'ime_syntax',
-                    expand('<script>:p:h') .. '/syntax'
-                )
-                if isdirectory(syntax_dir)
-                    const syntax_file = syntax_dir .. '/' .. &syntax
-                    if filereadable(syntax_file)
-                        LoadDataset(syntax_file)
-                        loaded_syntax = true
-                    else
-                        echom "No syntax guide for" &syntax
-                    endif
+        var loaded_syntax = false
+        var syntax_file = ''
+        if !empty(dataset_file)
+            syntax_file = dataset_file
+        elseif !empty(&syntax)
+            const syntax_dir = get(
+                g:, 'ime_syntax',
+                expand('<script>:p:h') .. '/syntax'
+            )
+            if isdirectory(syntax_dir)
+                syntax_file = syntax_dir .. '/' .. &syntax
+                if !filereadable(syntax_file)
+                    syntax_file = ''
+                    echom "No syntax guide for" &syntax
                 endif
             endif
-            if empty(dataset_file)
-                if loaded_syntax
-                    for file in ProjectList()
-                        LoadDataset(file)
-                    endfor
-                elseif getfsize(expand('%')) > 0
-                    LoadDataset(expand('%'))
-                else
-                    IMECleanup()
-                    return
-                endif
-            else
-                LoadDataset(dataset_file)
-            endif
-            ch_sendraw(ime_channel, "\n")
         endif
-        SetupMappings()
-        ime_enabled = true
-        echom printf(
-            "%s enabled %s",
-            IME_NAME,
-            (empty(dataset_file) ? '' : "with dataset: " .. dataset_file),
-        )
+        if !empty(syntax_file)
+            if ch_status(ime_channel) !=# 'open'
+                ime_job = job_start(ime_executable, {
+                    'in_mode': 'raw',
+                    'out_mode': 'raw',
+                    'out_cb': function('IMEOutput'),
+                    'close_cb': function('IMECloseCallback')
+                })
+                if job_status(ime_job) != 'run'
+                    throw "Failed to start IME process"
+                endif
+                ime_channel = job_getchannel(ime_job)
+                LoadDataset(syntax_file)
+                if getfsize(expand('%')) > 0
+                    LoadDataset(expand('%'))
+                endif
+                ch_sendraw(ime_channel, "\n")
+            endif
+            SetupMappings()
+            ime_enabled = true
+            echom printf(
+                "%s enabled %s",
+                IME_NAME,
+                (empty(dataset_file) ? '' : "with dataset: " .. dataset_file),
+            )
+        endif
     catch
         echom printf("Failed to start %s: %s", IME_NAME, v:exception)
         IMECleanup()
