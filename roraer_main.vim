@@ -194,7 +194,19 @@ export def IMEEnable(dataset_file: string = '')
                 endif
                 ime_channel = job_getchannel(ime_job)
                 if !empty(syntax_file)
-                    LoadDataset(syntax_file)
+                    const project = ProjectList()
+                    const project_max = get(g:, 'ime_project_max', 32)
+                    if len(project) <= project_max
+                        for f in project
+                            LoadDataset(f)
+                        endfor
+                    else
+                        LoadDataset(syntax_file)
+                        echom printf(
+                            "Too many files in project (%d > %d)",
+                            len(project), project_max
+                        )
+                    endif
                 endif
                 if !empty(dataset_file)
                     LoadDataset(dataset_file)
@@ -256,6 +268,7 @@ export def IMEPause()
     endif
     echom IME_NAME "paused"
 enddef
+    
 
 execute printf('command! -nargs=? %sEnable call IMEEnable(<q-args>)', IME_NAME)
 execute printf('command! %sDisable call IMEDisable()', IME_NAME)
