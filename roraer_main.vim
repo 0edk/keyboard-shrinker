@@ -163,11 +163,8 @@ export def IMEEnable(dataset_file: string = '')
     endif
     SaveCurrentMappings()
     try
-        var loaded_syntax = false
         var syntax_file = ''
-        if !empty(dataset_file)
-            syntax_file = dataset_file
-        elseif !empty(&syntax)
+        if !empty(&syntax)
             const syntax_dir = get(
                 g:, 'ime_syntax',
                 expand('<script>:p:h') .. '/syntax'
@@ -180,7 +177,11 @@ export def IMEEnable(dataset_file: string = '')
                 endif
             endif
         endif
-        if !empty(syntax_file)
+        const prohibited = get(
+            g:, 'ime_exclude',
+            ['gitcommit', 'text']
+        )
+        if index(prohibited, &syntax) == -1
             if ch_status(ime_channel) !=# 'open'
                 ime_job = job_start(ime_executable, {
                     'in_mode': 'raw',
@@ -192,7 +193,12 @@ export def IMEEnable(dataset_file: string = '')
                     throw "Failed to start IME process"
                 endif
                 ime_channel = job_getchannel(ime_job)
-                LoadDataset(syntax_file)
+                if !empty(syntax_file)
+                    LoadDataset(syntax_file)
+                endif
+                if !empty(dataset_file)
+                    LoadDataset(dataset_file)
+                endif
                 if getfsize(expand('%')) > 0
                     LoadDataset(expand('%'))
                 endif
