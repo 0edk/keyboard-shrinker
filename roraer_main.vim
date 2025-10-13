@@ -175,6 +175,8 @@ export def IMEEnable(dataset_file: string = '')
                     syntax_file = ''
                     echom "No syntax guide for" &syntax
                 endif
+            else
+                echom "No syntax guide directory" syntax_dir
             endif
         endif
         const prohibited = get(
@@ -194,6 +196,7 @@ export def IMEEnable(dataset_file: string = '')
                 endif
                 ime_channel = job_getchannel(ime_job)
                 if !empty(syntax_file)
+                    LoadDataset(syntax_file)
                     const project = ProjectList()
                     const project_max = get(g:, 'ime_project_max', 32)
                     if len(project) <= project_max
@@ -201,7 +204,6 @@ export def IMEEnable(dataset_file: string = '')
                             LoadDataset(f)
                         endfor
                     else
-                        LoadDataset(syntax_file)
                         echom printf(
                             "Too many files in project (%d > %d)",
                             len(project), project_max
