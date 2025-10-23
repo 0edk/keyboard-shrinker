@@ -197,18 +197,18 @@ export def IMEEnable(dataset_file: string = '')
                 ime_channel = job_getchannel(ime_job)
                 if !empty(syntax_file)
                     LoadDataset(syntax_file)
-                    const project = ProjectList()
-                    const project_max = get(g:, 'ime_project_max', 32)
-                    if len(project) <= project_max
-                        for f in project
-                            LoadDataset(f)
-                        endfor
-                    else
-                        echom printf(
-                            "Too many files in project (%d > %d)",
-                            len(project), project_max
-                        )
-                    endif
+                endif
+                const project = ProjectList()
+                const project_max = get(g:, 'ime_project_max', 32)
+                if len(project) <= project_max
+                    for f in project
+                        LoadDataset(f)
+                    endfor
+                else
+                    echom printf(
+                        "Too many files in project (%d > %d)",
+                        len(project), project_max
+                    )
                 endif
                 if !empty(dataset_file)
                     LoadDataset(dataset_file)
