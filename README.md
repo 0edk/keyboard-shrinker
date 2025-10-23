@@ -95,3 +95,7 @@ print(factorial(10))
 | r, i     | Built-in `print` matches |
 | (, a, c, t | `factorial` again |
 | (, 1, 0, ), ) |  |
+
+That's 74 keypresses for 118 characters.
+60 of these keypresses are (in the current Roraer layout) among the middle 30 keys around the home row.
+Roraer gets more efficient on larger programs.
